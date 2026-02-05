@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="dockGradient" x1="0" x2="1">
+      <stop offset="0" stop-color="#2A7184"/>
+      <stop offset="1" stop-color="#0E1A28"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Fond circulaire -->
+  <circle cx="32" cy="32" r="32" fill="url(#dockGradient)" />
+  
+  <!-- Dock -->
+  <rect x="16" y="28" width="32" height="8" rx="2" fill="#F5F4EF" opacity="0.9"/>
+  
+  <!-- Vagues -->
+  <path d="M8 40 Q16 30 32 40 T56 40" fill="none" stroke="#F5F4EF" stroke-width="2" stroke-linecap="round"/>
+</svg>
