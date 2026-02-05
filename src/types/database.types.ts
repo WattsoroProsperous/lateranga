@@ -4,6 +4,10 @@
  * For now, manually defined to match our schema.
  */
 
+// ============================================
+// Enums
+// ============================================
+
 export type OrderStatus =
   | "pending"
   | "confirmed"
@@ -17,9 +21,34 @@ export type OrderType = "sur_place" | "emporter" | "livraison";
 
 export type MenuTab = "plats" | "desserts" | "boissons";
 
-export type UserRole = "customer" | "admin";
+export type UserRole = "customer" | "admin" | "super_admin" | "cashier" | "chef";
 
 export type ReviewSource = "google" | "website";
+
+export type TableLocation = "interieur" | "terrasse" | "vip";
+
+export type StockUnit = "unit" | "kg" | "g" | "l" | "ml" | "piece";
+
+export type StockMovementType = "sale" | "restock" | "adjustment" | "request" | "waste" | "return";
+
+export type RequestStatus = "pending" | "approved" | "rejected";
+
+export type PaymentMethod = "cash" | "card" | "wave" | "orange_money" | "mtn_money";
+
+export type PaymentStatus = "pending" | "paid" | "refunded" | "cancelled";
+
+export type NotificationType =
+  | "new_order"
+  | "order_cancelled"
+  | "order_ready"
+  | "low_stock"
+  | "ingredient_request"
+  | "payment_validated"
+  | "table_order";
+
+// ============================================
+// Database Interface
+// ============================================
 
 export interface Database {
   public: {
@@ -148,8 +177,20 @@ export interface Database {
           subtotal: number;
           delivery_fee: number;
           total: number;
+          // Table references
+          table_session_id: string | null;
+          table_id: string | null;
+          // Payment fields
+          payment_status: PaymentStatus;
+          payment_method: PaymentMethod | null;
+          paid_at: string | null;
+          paid_amount: number;
+          validated_by: string | null;
+          payment_reference: string | null;
+          // Legacy WhatsApp fields
           whatsapp_message_id: string | null;
           whatsapp_sent_at: string | null;
+          // Timestamps
           confirmed_at: string | null;
           prepared_at: string | null;
           completed_at: string | null;
@@ -159,7 +200,7 @@ export interface Database {
           updated_at: string;
         };
         Insert: {
-          order_number: string;
+          order_number?: string;
           customer_id?: string | null;
           status?: OrderStatus;
           order_type: OrderType;
@@ -170,9 +211,19 @@ export interface Database {
           subtotal: number;
           delivery_fee?: number;
           total: number;
+          table_session_id?: string | null;
+          table_id?: string | null;
+          payment_status?: PaymentStatus;
+          payment_method?: PaymentMethod | null;
         };
         Update: {
           status?: OrderStatus;
+          payment_status?: PaymentStatus;
+          payment_method?: PaymentMethod | null;
+          paid_at?: string | null;
+          paid_amount?: number;
+          validated_by?: string | null;
+          payment_reference?: string | null;
           whatsapp_message_id?: string | null;
           whatsapp_sent_at?: string | null;
           confirmed_at?: string | null;
@@ -187,6 +238,20 @@ export interface Database {
             columns: ["customer_id"];
             isOneToOne: false;
             referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "orders_table_id_fkey";
+            columns: ["table_id"];
+            isOneToOne: false;
+            referencedRelation: "restaurant_tables";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "orders_table_session_id_fkey";
+            columns: ["table_session_id"];
+            isOneToOne: false;
+            referencedRelation: "table_sessions";
             referencedColumns: ["id"];
           },
         ];
@@ -357,16 +422,423 @@ export interface Database {
         };
         Relationships: [];
       };
+      // ============================================
+      // Table Management
+      // ============================================
+      restaurant_tables: {
+        Row: {
+          id: string;
+          table_number: number;
+          name: string;
+          qr_code_token: string;
+          capacity: number;
+          location: TableLocation | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          table_number: number;
+          name: string;
+          qr_code_token?: string;
+          capacity?: number;
+          location?: TableLocation | null;
+          is_active?: boolean;
+        };
+        Update: {
+          table_number?: number;
+          name?: string;
+          qr_code_token?: string;
+          capacity?: number;
+          location?: TableLocation | null;
+          is_active?: boolean;
+        };
+        Relationships: [];
+      };
+      table_sessions: {
+        Row: {
+          id: string;
+          table_id: string;
+          session_token: string;
+          started_at: string;
+          expires_at: string;
+          ended_at: string | null;
+          is_active: boolean;
+          created_at: string;
+        };
+        Insert: {
+          table_id: string;
+          session_token?: string;
+          expires_at?: string;
+          is_active?: boolean;
+        };
+        Update: {
+          is_active?: boolean;
+          ended_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "table_sessions_table_id_fkey";
+            columns: ["table_id"];
+            isOneToOne: false;
+            referencedRelation: "restaurant_tables";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      // ============================================
+      // Stock Management
+      // ============================================
+      stock_items: {
+        Row: {
+          id: string;
+          menu_item_id: string | null;
+          name: string;
+          description: string | null;
+          current_quantity: number;
+          unit: StockUnit;
+          min_threshold: number;
+          cost_per_unit: number;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          menu_item_id?: string | null;
+          name: string;
+          description?: string | null;
+          current_quantity?: number;
+          unit?: StockUnit;
+          min_threshold?: number;
+          cost_per_unit?: number;
+          is_active?: boolean;
+        };
+        Update: {
+          menu_item_id?: string | null;
+          name?: string;
+          description?: string | null;
+          current_quantity?: number;
+          unit?: StockUnit;
+          min_threshold?: number;
+          cost_per_unit?: number;
+          is_active?: boolean;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "stock_items_menu_item_id_fkey";
+            columns: ["menu_item_id"];
+            isOneToOne: false;
+            referencedRelation: "menu_items";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ingredients: {
+        Row: {
+          id: string;
+          name: string;
+          description: string | null;
+          current_quantity: number;
+          unit: StockUnit;
+          price_per_unit: number;
+          min_threshold: number;
+          supplier: string | null;
+          is_active: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          name: string;
+          description?: string | null;
+          current_quantity?: number;
+          unit?: StockUnit;
+          price_per_unit: number;
+          min_threshold?: number;
+          supplier?: string | null;
+          is_active?: boolean;
+        };
+        Update: {
+          name?: string;
+          description?: string | null;
+          current_quantity?: number;
+          unit?: StockUnit;
+          price_per_unit?: number;
+          min_threshold?: number;
+          supplier?: string | null;
+          is_active?: boolean;
+        };
+        Relationships: [];
+      };
+      recipe_ingredients: {
+        Row: {
+          id: string;
+          menu_item_id: string;
+          ingredient_id: string;
+          quantity_used: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          menu_item_id: string;
+          ingredient_id: string;
+          quantity_used: number;
+        };
+        Update: {
+          quantity_used?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "recipe_ingredients_menu_item_id_fkey";
+            columns: ["menu_item_id"];
+            isOneToOne: false;
+            referencedRelation: "menu_items";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "recipe_ingredients_ingredient_id_fkey";
+            columns: ["ingredient_id"];
+            isOneToOne: false;
+            referencedRelation: "ingredients";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      ingredient_requests: {
+        Row: {
+          id: string;
+          ingredient_id: string;
+          requested_by: string;
+          quantity: number;
+          reason: string | null;
+          status: RequestStatus;
+          approved_by: string | null;
+          approved_at: string | null;
+          rejection_reason: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          ingredient_id: string;
+          requested_by: string;
+          quantity: number;
+          reason?: string | null;
+          status?: RequestStatus;
+        };
+        Update: {
+          status?: RequestStatus;
+          approved_by?: string | null;
+          approved_at?: string | null;
+          rejection_reason?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "ingredient_requests_ingredient_id_fkey";
+            columns: ["ingredient_id"];
+            isOneToOne: false;
+            referencedRelation: "ingredients";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "ingredient_requests_requested_by_fkey";
+            columns: ["requested_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      stock_movements: {
+        Row: {
+          id: string;
+          stock_item_id: string | null;
+          ingredient_id: string | null;
+          movement_type: StockMovementType;
+          quantity: number;
+          previous_quantity: number;
+          new_quantity: number;
+          reference_id: string | null;
+          reference_type: string | null;
+          note: string | null;
+          performed_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          stock_item_id?: string | null;
+          ingredient_id?: string | null;
+          movement_type: StockMovementType;
+          quantity: number;
+          previous_quantity: number;
+          new_quantity: number;
+          reference_id?: string | null;
+          reference_type?: string | null;
+          note?: string | null;
+          performed_by?: string | null;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "stock_movements_stock_item_id_fkey";
+            columns: ["stock_item_id"];
+            isOneToOne: false;
+            referencedRelation: "stock_items";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "stock_movements_ingredient_id_fkey";
+            columns: ["ingredient_id"];
+            isOneToOne: false;
+            referencedRelation: "ingredients";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      // ============================================
+      // Notifications
+      // ============================================
+      notifications: {
+        Row: {
+          id: string;
+          type: NotificationType;
+          title: string;
+          message: string;
+          data: Record<string, unknown>;
+          target_roles: UserRole[];
+          target_user_id: string | null;
+          is_read: boolean;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          type: NotificationType;
+          title: string;
+          message: string;
+          data?: Record<string, unknown>;
+          target_roles: UserRole[];
+          target_user_id?: string | null;
+          is_read?: boolean;
+        };
+        Update: {
+          is_read?: boolean;
+          read_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "notifications_target_user_id_fkey";
+            columns: ["target_user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      user_has_role: {
+        Args: { required_roles: UserRole[] };
+        Returns: boolean;
+      };
+      is_staff: {
+        Args: Record<string, never>;
+        Returns: boolean;
+      };
+      is_manager: {
+        Args: Record<string, never>;
+        Returns: boolean;
+      };
+      create_table_session: {
+        Args: { p_table_token: string };
+        Returns: {
+          session_id: string;
+          session_token: string;
+          table_name: string;
+          expires_at: string;
+        }[];
+      };
+      validate_payment: {
+        Args: {
+          p_order_id: string;
+          p_payment_method: PaymentMethod;
+          p_paid_amount: number;
+          p_validated_by: string;
+          p_reference?: string | null;
+        };
+        Returns: void;
+      };
+      get_unpaid_orders: {
+        Args: Record<string, never>;
+        Returns: {
+          id: string;
+          order_number: string;
+          client_name: string;
+          total: number;
+          status: OrderStatus;
+          table_name: string | null;
+          created_at: string;
+        }[];
+      };
+      get_low_stock_items: {
+        Args: Record<string, never>;
+        Returns: {
+          item_type: string;
+          item_id: string;
+          name: string;
+          current_quantity: number;
+          min_threshold: number;
+          unit: StockUnit;
+        }[];
+      };
+      calculate_item_cost: {
+        Args: { p_menu_item_id: string };
+        Returns: number;
+      };
+    };
     Enums: {
       order_status: OrderStatus;
       order_type: OrderType;
       menu_tab: MenuTab;
       user_role: UserRole;
       review_source: ReviewSource;
+      table_location: TableLocation;
+      stock_unit: StockUnit;
+      stock_movement_type: StockMovementType;
+      request_status: RequestStatus;
+      payment_method: PaymentMethod;
+      payment_status: PaymentStatus;
+      notification_type: NotificationType;
     };
     CompositeTypes: Record<string, never>;
   };
 }
+
+// ============================================
+// Convenience Types
+// ============================================
+
+export type Tables<T extends keyof Database["public"]["Tables"]> =
+  Database["public"]["Tables"][T]["Row"];
+
+export type InsertTables<T extends keyof Database["public"]["Tables"]> =
+  Database["public"]["Tables"][T]["Insert"];
+
+export type UpdateTables<T extends keyof Database["public"]["Tables"]> =
+  Database["public"]["Tables"][T]["Update"];
+
+// Shorthand types
+export type Profile = Tables<"profiles">;
+export type MenuCategory = Tables<"menu_categories">;
+export type MenuItem = Tables<"menu_items">;
+export type Order = Tables<"orders">;
+export type OrderItem = Tables<"order_items">;
+export type OrderStatusHistory = Tables<"order_status_history">;
+export type Review = Tables<"reviews">;
+export type GalleryImage = Tables<"gallery_images">;
+export type RestaurantSetting = Tables<"restaurant_settings">;
+export type RestaurantTable = Tables<"restaurant_tables">;
+export type TableSession = Tables<"table_sessions">;
+export type StockItem = Tables<"stock_items">;
+export type Ingredient = Tables<"ingredients">;
+export type RecipeIngredient = Tables<"recipe_ingredients">;
+export type IngredientRequest = Tables<"ingredient_requests">;
+export type StockMovement = Tables<"stock_movements">;
+export type Notification = Tables<"notifications">;

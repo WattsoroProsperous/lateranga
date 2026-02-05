@@ -251,3 +251,112 @@ export async function getOrderById(id: string) {
   if (error) return { error: error.message };
   return { data: data as Order };
 }
+
+// Create order from table (QR code ordering)
+export async function createTableOrder(input: {
+  table_id: string;
+  table_session_id: string;
+  client_name: string;
+  items: Array<{
+    id: string;
+    name: string;
+    price: number;
+    qty: number;
+    sizeVariant?: "petit" | "grand";
+  }>;
+}) {
+  const supabase = createAdminClient();
+
+  const subtotal = input.items.reduce(
+    (sum, item) => sum + item.price * item.qty,
+    0
+  );
+
+  // Create order linked to table
+  const { data: orderData, error: orderError } = await supabase
+    .from("orders")
+    .insert({
+      order_number: "",
+      customer_id: null,
+      status: "pending" as const,
+      order_type: "sur_place" as const,
+      client_name: input.client_name,
+      client_phone: "0000000000", // Table orders don't need phone
+      delivery_address: null,
+      notes: null,
+      subtotal,
+      delivery_fee: 0,
+      total: subtotal,
+      table_id: input.table_id,
+      table_session_id: input.table_session_id,
+      payment_status: "pending" as const,
+    } as never)
+    .select()
+    .single();
+
+  const order = orderData as Order | null;
+
+  if (orderError || !order) {
+    console.error("Error creating table order:", orderError);
+    return { error: orderError?.message ?? "Erreur lors de la creation de la commande" };
+  }
+
+  // Add order items - item.id is now the original menu_item UUID
+  const orderItems = input.items.map((item) => ({
+    order_id: order.id,
+    menu_item_id: item.id,
+    item_name: item.name,
+    item_price: item.price,
+    quantity: item.qty,
+    line_total: item.price * item.qty,
+    size_variant: item.sizeVariant ?? null,
+  }));
+
+  const { error: itemsError } = await supabase
+    .from("order_items")
+    .insert(orderItems as never);
+
+  if (itemsError) {
+    // Rollback order
+    await supabase.from("orders").delete().eq("id", order.id);
+    return { error: "Erreur lors de l'ajout des articles" };
+  }
+
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/kitchen");
+  revalidatePath("/admin/tables");
+  return { success: true, orderNumber: order.order_number };
+}
+
+// Get orders for a table session (customer order history)
+export async function getSessionOrders(sessionId: string) {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(`
+      id,
+      order_number,
+      status,
+      total,
+      created_at,
+      payment_status,
+      order_items (
+        id,
+        item_name,
+        item_price,
+        quantity,
+        line_total,
+        size_variant
+      )
+    `)
+    .eq("table_session_id", sessionId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Error fetching session orders:", error);
+    return { error: error.message };
+  }
+
+  return { data };
+}

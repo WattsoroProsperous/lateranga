@@ -34,6 +34,18 @@ export async function getAllMenuCategories() {
   return { data: categories };
 }
 
+export async function getMenuItems() {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("menu_items")
+    .select("*, category:menu_categories(id, name, tab)")
+    .order("name");
+
+  if (error) return { error: error.message };
+  return { data };
+}
+
 export async function getMenuItemById(id: string) {
   const supabase = createAdminClient();
 
