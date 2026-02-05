@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { ReviewsTable } from "@/components/admin/reviews-table";
 import type { Review } from "@/types";
 import type { Metadata } from "next";
@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 export default async function AdminReviewsPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("reviews")
     .select("*")

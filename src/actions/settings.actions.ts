@@ -1,18 +1,17 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient, isCurrentUserAdmin, getCurrentUser } from "@/lib/supabase/admin";
 import { revalidatePath } from "next/cache";
 import type { RestaurantSetting } from "@/types";
 
 export async function getSettings() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("restaurant_settings")
     .select("*");
 
   if (error) return { error: error.message };
 
-  // Convert array to key-value map
   const rows = (data ?? []) as RestaurantSetting[];
   const settings: Record<string, unknown> = {};
   for (const row of rows) {
@@ -22,10 +21,13 @@ export async function getSettings() {
 }
 
 export async function updateSetting(key: string, value: unknown) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const isAdmin = await isCurrentUserAdmin();
+  if (!isAdmin) {
+    return { error: "Non autorise" };
+  }
+
+  const user = await getCurrentUser();
+  const supabase = createAdminClient();
 
   const { error } = await supabase
     .from("restaurant_settings")
@@ -38,5 +40,6 @@ export async function updateSetting(key: string, value: unknown) {
   if (error) return { error: error.message };
 
   revalidatePath("/admin");
+  revalidatePath("/");
   return { success: true };
 }

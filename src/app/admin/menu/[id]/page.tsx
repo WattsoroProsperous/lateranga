@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,10 +17,13 @@ import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 import { ArrowLeft, Loader2 } from "lucide-react";
 import Link from "next/link";
-import type { MenuItem, MenuCategory } from "@/types";
-
-type MenuCategoryRow = MenuCategory;
-type MenuItemRow = MenuItem;
+import {
+  createMenuItem,
+  updateMenuItem,
+  getAllMenuCategories,
+  getMenuItemById,
+} from "@/actions/menu.actions";
+import type { MenuCategory } from "@/types";
 
 export default function MenuItemEditPage() {
   const params = useParams();
@@ -29,8 +31,8 @@ export default function MenuItemEditPage() {
   const id = params.id as string;
   const isNew = id === "new";
 
+  const [isPending, startTransition] = useTransition();
   const [loading, setLoading] = useState(!isNew);
-  const [saving, setSaving] = useState(false);
   const [categories, setCategories] = useState<MenuCategory[]>([]);
   const [form, setForm] = useState({
     name: "",
@@ -45,50 +47,37 @@ export default function MenuItemEditPage() {
   });
 
   useEffect(() => {
-    const supabase = createClient();
+    async function loadData() {
+      const catResult = await getAllMenuCategories();
+      if (catResult.data) {
+        setCategories(catResult.data as MenuCategory[]);
+      }
 
-    // Fetch categories
-    supabase
-      .from("menu_categories")
-      .select("*")
-      .eq("is_active", true)
-      .order("sort_order")
-      .then(({ data }) => {
-        if (data) setCategories(data as MenuCategoryRow[]);
-      });
-
-    // Fetch item if editing
-    if (!isNew) {
-      supabase
-        .from("menu_items")
-        .select("*")
-        .eq("id", id)
-        .single()
-        .then(({ data }) => {
-          const item = data as MenuItemRow | null;
-          if (item) {
-            setForm({
-              name: item.name,
-              description: item.description ?? "",
-              price: String(item.price),
-              price_small: item.price_small ? String(item.price_small) : "",
-              category_id: item.category_id,
-              is_available: item.is_available,
-              is_featured: item.is_featured,
-              requires_order: item.requires_order,
-              sort_order: String(item.sort_order),
-            });
-          }
-          setLoading(false);
-        });
+      if (!isNew) {
+        const itemResult = await getMenuItemById(id);
+        if (itemResult.data) {
+          const item = itemResult.data;
+          setForm({
+            name: item.name,
+            description: item.description ?? "",
+            price: String(item.price),
+            price_small: item.price_small ? String(item.price_small) : "",
+            category_id: item.category_id,
+            is_available: item.is_available,
+            is_featured: item.is_featured,
+            requires_order: item.requires_order,
+            sort_order: String(item.sort_order),
+          });
+        }
+        setLoading(false);
+      }
     }
+    loadData();
   }, [id, isNew]);
 
-  async function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSaving(true);
 
-    const supabase = createClient();
     const payload = {
       name: form.name,
       description: form.description || null,
@@ -99,34 +88,27 @@ export default function MenuItemEditPage() {
       is_featured: form.is_featured,
       requires_order: form.requires_order,
       sort_order: parseInt(form.sort_order, 10),
-      slug: form.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/(^-|-$)/g, ""),
     };
 
-    if (isNew) {
-      const { error } = await supabase.from("menu_items").insert(payload as never);
-      if (error) {
-        toast.error("Erreur lors de la création");
+    startTransition(async () => {
+      if (isNew) {
+        const result = await createMenuItem(payload);
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          toast.success("Article cree");
+          router.push("/admin/menu");
+        }
       } else {
-        toast.success("Article créé");
-        router.push("/admin/menu");
+        const result = await updateMenuItem({ id, ...payload });
+        if (result.error) {
+          toast.error(result.error);
+        } else {
+          toast.success("Article mis a jour");
+          router.push("/admin/menu");
+        }
       }
-    } else {
-      const { error } = await supabase
-        .from("menu_items")
-        .update(payload as never)
-        .eq("id", id);
-      if (error) {
-        toast.error("Erreur lors de la mise à jour");
-      } else {
-        toast.success("Article mis à jour");
-        router.push("/admin/menu");
-      }
-    }
-
-    setSaving(false);
+    });
   }
 
   if (loading) {
@@ -200,13 +182,13 @@ export default function MenuItemEditPage() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="category">Catégorie</Label>
+            <Label htmlFor="category">Categorie</Label>
             <Select
               value={form.category_id}
               onValueChange={(v) => setForm({ ...form, category_id: v })}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Sélectionner une catégorie" />
+                <SelectValue placeholder="Selectionner une categorie" />
               </SelectTrigger>
               <SelectContent>
                 {categories.map((cat) => (
@@ -267,14 +249,14 @@ export default function MenuItemEditPage() {
           </div>
 
           <div className="flex gap-3 pt-4">
-            <Button type="submit" disabled={saving}>
-              {saving ? (
+            <Button type="submit" disabled={isPending}>
+              {isPending ? (
                 <>
                   <Loader2 className="mr-2 size-4 animate-spin" />
                   Enregistrement...
                 </>
               ) : isNew ? (
-                "Créer l'article"
+                "Creer l'article"
               ) : (
                 "Enregistrer"
               )}

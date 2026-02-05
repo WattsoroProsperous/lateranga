@@ -1,12 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { MessageCircle } from "lucide-react";
+import { useState, useTransition } from "react";
+import { ShoppingBag, Loader2 } from "lucide-react";
 import { useCartStore, selectTotalPrice } from "@/stores/cart-store";
-import { formatXOF } from "@/lib/utils";
+import { createOrder } from "@/actions/order.actions";
 import { toast } from "sonner";
-
-const WHATSAPP_PHONE = process.env.NEXT_PUBLIC_WHATSAPP_PHONE || "2250143848821";
+import { OrderConfirmation } from "./order-confirmation";
 
 export function OrderForm() {
   const items = useCartStore((s) => s.items);
@@ -14,54 +13,62 @@ export function OrderForm() {
   const setOpen = useCartStore((s) => s.setOpen);
   const total = useCartStore(selectTotalPrice);
 
+  const [isPending, startTransition] = useTransition();
+  const [orderNumber, setOrderNumber] = useState<string | null>(null);
+
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
-  const [orderType, setOrderType] = useState("sur_place");
+  const [orderType, setOrderType] = useState<"sur_place" | "emporter" | "livraison">("sur_place");
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const typeLabels: Record<string, string> = {
-      sur_place: "Sur place",
-      emporter: "À emporter",
-      livraison: "Livraison",
-    };
+    startTransition(async () => {
+      const result = await createOrder({
+        client_name: clientName,
+        client_phone: clientPhone,
+        order_type: orderType,
+        delivery_address: orderType === "livraison" ? address : undefined,
+        notes: notes || undefined,
+        items: items.map((item) => ({
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          qty: item.qty,
+        })),
+      });
 
-    const itemLines = items
-      .map((item) => `• ${item.qty}x ${item.name} — ${formatXOF(item.price * item.qty)}`)
-      .join("\n");
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
 
-    let message = `🍽️ *Nouvelle commande — La Teranga*\n\n`;
-    message += `👤 *Client :* ${clientName}\n`;
-    message += `📞 *Tél :* ${clientPhone}\n`;
-    message += `📍 *Type :* ${typeLabels[orderType] || orderType}\n`;
-    if (orderType === "livraison" && address) {
-      message += `🏠 *Adresse :* ${address}\n`;
-    }
-    message += `\n📋 *Commande :*\n${itemLines}\n`;
-    message += `\n💰 *Total : ${formatXOF(total, { long: true })}*`;
-    if (notes) {
-      message += `\n\n📝 *Notes :* ${notes}`;
-    }
+      // Success
+      setOrderNumber(result.orderNumber!);
+      clearCart();
+      toast.success("Commande envoyee avec succes !");
+    });
+  };
 
-    // Ouvre WhatsApp avec le message pré-rempli
-    const url = `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(message)}`;
-    window.open(url, "_blank");
-
-    toast.success("Commande prête ! Envoyez le message sur WhatsApp.");
-    clearCart();
-    setOpen(false);
+  const handleNewOrder = () => {
+    setOrderNumber(null);
     setClientName("");
     setClientPhone("");
     setOrderType("sur_place");
     setAddress("");
     setNotes("");
+    setOpen(false);
   };
 
+  // Show confirmation if order was placed
+  if (orderNumber) {
+    return <OrderConfirmation orderNumber={orderNumber} onNewOrder={handleNewOrder} />;
+  }
+
   const inputClass =
-    "w-full px-4 py-3 bg-secondary border border-border rounded-xl text-foreground text-[15px] transition-all duration-200 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground";
+    "w-full px-4 py-3 bg-secondary border border-border rounded-xl text-foreground text-[15px] transition-all duration-200 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/10 placeholder:text-muted-foreground disabled:opacity-50";
 
   return (
     <form onSubmit={handleSubmit} className="mt-6 space-y-4">
@@ -75,13 +82,14 @@ export function OrderForm() {
           onChange={(e) => setClientName(e.target.value)}
           placeholder="Ex: Mamadou Diallo"
           required
+          disabled={isPending}
           className={inputClass}
         />
       </div>
 
       <div>
         <label className="block mb-2 font-semibold text-[13px] text-foreground">
-          Téléphone *
+          Telephone *
         </label>
         <input
           type="tel"
@@ -89,6 +97,7 @@ export function OrderForm() {
           onChange={(e) => setClientPhone(e.target.value)}
           placeholder="Ex: 07 00 00 00 00"
           required
+          disabled={isPending}
           className={inputClass}
         />
       </div>
@@ -99,11 +108,12 @@ export function OrderForm() {
         </label>
         <select
           value={orderType}
-          onChange={(e) => setOrderType(e.target.value)}
+          onChange={(e) => setOrderType(e.target.value as typeof orderType)}
+          disabled={isPending}
           className={`${inputClass} cursor-pointer`}
         >
           <option value="sur_place">Sur place</option>
-          <option value="emporter">À emporter</option>
+          <option value="emporter">A emporter</option>
           <option value="livraison">Livraison</option>
         </select>
       </div>
@@ -116,7 +126,8 @@ export function OrderForm() {
           <textarea
             value={address}
             onChange={(e) => setAddress(e.target.value)}
-            placeholder="Votre adresse complète..."
+            placeholder="Votre adresse complete..."
+            disabled={isPending}
             className={`${inputClass} resize-vertical min-h-[80px]`}
           />
         </div>
@@ -129,23 +140,34 @@ export function OrderForm() {
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
-          placeholder="Instructions spéciales, allergies..."
+          placeholder="Instructions speciales, allergies..."
+          disabled={isPending}
           className={`${inputClass} resize-vertical min-h-[80px]`}
         />
       </div>
 
       <button
         type="submit"
-        className="w-full px-4 py-4 bg-[#25D366] text-white rounded-2xl text-[15px] font-semibold flex items-center justify-center gap-2.5 transition-all duration-300 hover:bg-[#1da851] hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98]"
+        disabled={isPending || items.length === 0}
+        className="w-full px-4 py-4 bg-primary text-primary-foreground rounded-2xl text-[15px] font-semibold flex items-center justify-center gap-2.5 transition-all duration-300 hover:bg-primary/90 hover:-translate-y-0.5 hover:shadow-lg active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
       >
-        <MessageCircle className="w-5 h-5" />
-        Commander via WhatsApp
+        {isPending ? (
+          <>
+            <Loader2 className="w-5 h-5 animate-spin" />
+            Envoi en cours...
+          </>
+        ) : (
+          <>
+            <ShoppingBag className="w-5 h-5" />
+            Valider la commande
+          </>
+        )}
       </button>
 
       <p className="text-center text-[11px] text-muted-foreground leading-relaxed">
-        WhatsApp s&apos;ouvre avec votre commande pré-remplie.
+        Votre commande sera enregistree et preparee.
         <br />
-        Il suffit d&apos;appuyer sur Envoyer.
+        Total: {total.toLocaleString("fr-CI")} FCFA
       </p>
     </form>
   );

@@ -6,7 +6,9 @@ import { cn } from "@/lib/utils";
 import { BrandLogo } from "@/components/store/brand-logo";
 import {
   LayoutDashboard,
+  Calculator,
   ShoppingBag,
+  BarChart3,
   UtensilsCrossed,
   Image,
   MessageSquare,
@@ -20,9 +22,19 @@ const navItems = [
     icon: LayoutDashboard,
   },
   {
+    label: "Caisse (POS)",
+    href: "/admin/pos",
+    icon: Calculator,
+  },
+  {
     label: "Commandes",
     href: "/admin/orders",
     icon: ShoppingBag,
+  },
+  {
+    label: "Rapports",
+    href: "/admin/reports",
+    icon: BarChart3,
   },
   {
     label: "Menu",
@@ -62,11 +74,12 @@ export function AdminSidebar() {
             <Link
               key={item.href}
               href={item.href}
+              prefetch={true}
               className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-google",
+                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-150",
                 isActive
                   ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground active:scale-[0.98]"
               )}
             >
               <item.icon className="size-5" />
@@ -79,7 +92,8 @@ export function AdminSidebar() {
       <div className="border-t p-4">
         <Link
           href="/"
-          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-google hover:bg-muted hover:text-foreground"
+          prefetch={true}
+          className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-all duration-150 hover:bg-muted hover:text-foreground active:scale-[0.98]"
         >
           <ArrowLeft className="size-5" />
           Retour au site

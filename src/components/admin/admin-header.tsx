@@ -6,6 +6,7 @@ import { signOut } from "@/actions/auth.actions";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/store/theme-toggle";
 import { AdminSidebar } from "./admin-sidebar";
+import { OrderNotifications } from "./order-notifications";
 import {
   Menu,
   LogOut,
@@ -14,7 +15,9 @@ import {
 
 const pageTitles: Record<string, string> = {
   "/admin": "Dashboard",
+  "/admin/pos": "Caisse",
   "/admin/orders": "Commandes",
+  "/admin/reports": "Rapports",
   "/admin/menu": "Menu",
   "/admin/gallery": "Galerie",
   "/admin/reviews": "Avis",
@@ -44,6 +47,7 @@ export function AdminHeader() {
         </div>
 
         <div className="flex items-center gap-2">
+          <OrderNotifications />
           <ThemeToggle />
           <form action={signOut}>
             <Button variant="ghost" size="icon" type="submit">

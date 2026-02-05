@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { GalleryManager } from "@/components/admin/gallery-manager";
 import type { GalleryImage } from "@/types";
 import type { Metadata } from "next";
@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 };
 
 export default async function AdminGalleryPage() {
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { data } = await supabase
     .from("gallery_images")
     .select("*")

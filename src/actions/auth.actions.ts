@@ -11,13 +11,26 @@ export async function signIn(formData: { email: string; password: string }) {
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email: parsed.data.email,
     password: parsed.data.password,
   });
 
   if (error) {
     return { error: "Email ou mot de passe incorrect" };
+  }
+
+  // Check if user is admin and redirect accordingly
+  if (data.user) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", data.user.id)
+      .single();
+
+    if (profile?.role === "admin") {
+      redirect("/admin");
+    }
   }
 
   redirect("/");

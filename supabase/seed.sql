@@ -3,6 +3,44 @@
 -- ============================================
 
 -- ============================================
+-- Admin User (for local development)
+-- Email: admin@lateranga.ci
+-- Password: Admin123!
+-- ============================================
+
+-- Create admin user in auth.users
+INSERT INTO auth.users (
+  id,
+  instance_id,
+  email,
+  encrypted_password,
+  email_confirmed_at,
+  raw_app_meta_data,
+  raw_user_meta_data,
+  created_at,
+  updated_at,
+  role,
+  aud
+) VALUES (
+  'a0000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000000',
+  'admin@lateranga.ci',
+  crypt('Admin123!', gen_salt('bf')),
+  NOW(),
+  '{"provider":"email","providers":["email"]}',
+  '{"full_name":"Admin La Teranga"}',
+  NOW(),
+  NOW(),
+  'authenticated',
+  'authenticated'
+) ON CONFLICT (id) DO NOTHING;
+
+-- Create admin profile
+INSERT INTO profiles (id, full_name, role)
+VALUES ('a0000000-0000-0000-0000-000000000001', 'Admin La Teranga', 'admin')
+ON CONFLICT (id) DO UPDATE SET role = 'admin';
+
+-- ============================================
 -- Menu Categories (8 categories)
 -- ============================================
 
