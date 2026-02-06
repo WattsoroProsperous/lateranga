@@ -38,7 +38,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, Search, MoreHorizontal, Pencil, Trash2, ChefHat, AlertTriangle, ArrowLeft, TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
+import { Plus, Search, MoreHorizontal, Pencil, Trash2, ChefHat, AlertTriangle, ArrowLeft, TrendingUp, TrendingDown, RefreshCw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 import { createIngredient, updateIngredient, deleteIngredient, adjustStock } from "@/actions/stock.actions";
@@ -89,6 +89,7 @@ export function IngredientsManager({ initialIngredients }: IngredientsManagerPro
     unit: "kg",
     price_per_unit: 0,
     min_threshold: 1,
+    approval_threshold: null as number | null,
     supplier: "",
   });
 
@@ -110,6 +111,7 @@ export function IngredientsManager({ initialIngredients }: IngredientsManagerPro
       unit: "kg",
       price_per_unit: 0,
       min_threshold: 1,
+      approval_threshold: null,
       supplier: "",
     });
     setShowAddDialog(true);
@@ -124,6 +126,7 @@ export function IngredientsManager({ initialIngredients }: IngredientsManagerPro
       unit: item.unit,
       price_per_unit: item.price_per_unit,
       min_threshold: item.min_threshold,
+      approval_threshold: item.approval_threshold,
       supplier: item.supplier || "",
     });
     setShowEditDialog(true);
@@ -147,6 +150,7 @@ export function IngredientsManager({ initialIngredients }: IngredientsManagerPro
         ...formData,
         description: formData.description || null,
         supplier: formData.supplier || null,
+        approval_threshold: formData.approval_threshold,
       });
       if (result.error) {
         toast.error(result.error);
@@ -167,6 +171,7 @@ export function IngredientsManager({ initialIngredients }: IngredientsManagerPro
         ...formData,
         description: formData.description || null,
         supplier: formData.supplier || null,
+        approval_threshold: formData.approval_threshold,
       });
       if (result.error) {
         toast.error(result.error);
@@ -301,6 +306,7 @@ export function IngredientsManager({ initialIngredients }: IngredientsManagerPro
                   <TableHead>Fournisseur</TableHead>
                   <TableHead className="text-center">Quantite</TableHead>
                   <TableHead className="text-center">Seuil Min.</TableHead>
+                  <TableHead className="text-center">Seuil Approbation</TableHead>
                   <TableHead className="text-right">Prix/Unite</TableHead>
                   <TableHead className="text-right">Valeur</TableHead>
                   <TableHead className="text-center">Statut</TableHead>
@@ -342,6 +348,16 @@ export function IngredientsManager({ initialIngredients }: IngredientsManagerPro
                         </TableCell>
                         <TableCell className="text-center text-muted-foreground">
                           {item.min_threshold} {getUnitLabel(item.unit)}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {item.approval_threshold !== null ? (
+                            <Badge variant="outline" className="gap-1">
+                              <ShieldAlert className="h-3 w-3" />
+                              {item.approval_threshold} {getUnitLabel(item.unit)}
+                            </Badge>
+                          ) : (
+                            <span className="text-muted-foreground text-sm">—</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-right">
                           {formatCurrency(item.price_per_unit)}/{getUnitLabel(item.unit)}
@@ -493,6 +509,30 @@ export function IngredientsManager({ initialIngredients }: IngredientsManagerPro
               </div>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="approval-threshold" className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4" />
+                Seuil d'approbation (optionnel)
+              </Label>
+              <Input
+                id="approval-threshold"
+                type="number"
+                min="0"
+                step="0.1"
+                value={formData.approval_threshold ?? ""}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    approval_threshold: e.target.value ? parseFloat(e.target.value) : null,
+                  })
+                }
+                placeholder="Ex: 5"
+              />
+              <p className="text-xs text-muted-foreground">
+                Au-dela de cette quantite, le retrait par le chef necessite une approbation admin.
+                Laissez vide pour aucune limite.
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="supplier">Fournisseur (optionnel)</Label>
               <Input
                 id="supplier"
@@ -599,6 +639,30 @@ export function IngredientsManager({ initialIngredients }: IngredientsManagerPro
                   }
                 />
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-approval-threshold" className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4" />
+                Seuil d'approbation (optionnel)
+              </Label>
+              <Input
+                id="edit-approval-threshold"
+                type="number"
+                min="0"
+                step="0.1"
+                value={formData.approval_threshold ?? ""}
+                onChange={(e) =>
+                  setFormData({
+                    ...formData,
+                    approval_threshold: e.target.value ? parseFloat(e.target.value) : null,
+                  })
+                }
+                placeholder="Ex: 5"
+              />
+              <p className="text-xs text-muted-foreground">
+                Au-dela de cette quantite, le retrait par le chef necessite une approbation admin.
+                Laissez vide pour aucune limite.
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-supplier">Fournisseur (optionnel)</Label>

@@ -1,10 +1,51 @@
 "use server";
 
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient, isCurrentUserAdmin } from "@/lib/supabase/admin";
+import { createAdminClient, isCurrentUserAdmin, canValidatePayments, hasRole, getCurrentUserProfile, getCurrentUserRole } from "@/lib/supabase/admin";
 import { createOrderSchema, updateOrderStatusSchema } from "@/lib/validations/order.schema";
+import { PERMISSIONS, MANAGER_ROLES } from "@/lib/auth/permissions";
 import { revalidatePath } from "next/cache";
-import type { Order } from "@/types";
+import type { Order, AuditActionType } from "@/types";
+
+// ============================================
+// Audit Logging Helper
+// ============================================
+
+async function createAuditLog(params: {
+  actionType: AuditActionType;
+  orderId: string;
+  orderNumber: string;
+  orderData: Record<string, unknown>;
+  reason: string;
+  changes?: Record<string, unknown>;
+}) {
+  const supabase = createAdminClient();
+  const profile = await getCurrentUserProfile();
+  const role = await getCurrentUserRole();
+
+  if (!profile || !role) {
+    console.error("[Audit] No profile found for audit log");
+    return;
+  }
+
+  const { error } = await supabase
+    .from("order_audit_log")
+    .insert({
+      action_type: params.actionType,
+      actor_id: profile.id,
+      actor_role: role,
+      actor_name: profile.full_name,
+      order_id: params.orderId,
+      order_number: params.orderNumber,
+      order_data: params.orderData,
+      reason: params.reason,
+      changes: params.changes ?? null,
+    } as never);
+
+  if (error) {
+    console.error("[Audit] Error creating audit log:", error);
+  }
+}
 
 export async function createOrder(input: unknown) {
   const parsed = createOrderSchema.safeParse(input);
@@ -76,9 +117,10 @@ export async function createOrder(input: unknown) {
 }
 
 export async function createPOSOrder(input: unknown) {
-  const isAdmin = await isCurrentUserAdmin();
-  if (!isAdmin) {
-    return { error: "Non autorise" };
+  // POS requires payment validation permission (cashier, admin, super_admin)
+  const canPay = await canValidatePayments();
+  if (!canPay) {
+    return { error: "Non autorise - Seuls les caissiers et administrateurs peuvent enregistrer des ventes" };
   }
 
   const parsed = createOrderSchema.safeParse(input);
@@ -94,7 +136,9 @@ export async function createPOSOrder(input: unknown) {
     0
   );
   const total = subtotal;
+  const now = new Date().toISOString();
 
+  // POS orders are immediately completed and paid
   const { data: orderData, error: orderError } = await supabase
     .from("orders")
     .insert({
@@ -109,7 +153,9 @@ export async function createPOSOrder(input: unknown) {
       subtotal,
       delivery_fee: 0,
       total,
-      completed_at: new Date().toISOString(),
+      payment_status: "paid" as const,
+      paid_at: now,
+      completed_at: now,
     } as never)
     .select()
     .single();
@@ -147,21 +193,73 @@ export async function createPOSOrder(input: unknown) {
 }
 
 export async function updateOrderStatus(input: unknown) {
-  const isAdmin = await isCurrentUserAdmin();
-  if (!isAdmin) {
-    return { error: "Non autorise" };
-  }
-
   const parsed = updateOrderStatusSchema.safeParse(input);
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Donnees invalides" };
   }
 
-  const supabase = createAdminClient();
-  const updateData: Record<string, unknown> = { status: parsed.data.status };
+  const newStatus = parsed.data.status;
 
-  if (parsed.data.status === "cancelled" && parsed.data.cancellation_reason) {
+  // "completed" status can only be set via payment validation (markOrderAsPaid)
+  // This ensures orders are only completed when they are paid
+  if (newStatus === "completed") {
+    return { error: "Le statut 'completed' ne peut etre defini que via l'encaissement" };
+  }
+
+  const supabase = createAdminClient();
+  const currentRole = await getCurrentUserRole();
+
+  // Get order to check type
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .eq("id", parsed.data.id)
+    .single();
+
+  if (!order) {
+    return { error: "Commande non trouvee" };
+  }
+
+  // Check permissions based on status
+  if (newStatus === "cancelled") {
+    const canCancel = await hasRole(PERMISSIONS.ORDERS_CANCEL);
+    if (!canCancel) {
+      return { error: "Non autorise - Vous ne pouvez pas annuler cette commande" };
+    }
+
+    // Chef can ONLY cancel table orders (QR code orders with ingredients issues)
+    // Admin/super_admin can cancel any order
+    if (currentRole === "chef") {
+      // Check if order is from a table (QR code order)
+      if (!order.table_id) {
+        return { error: "Non autorise - Le chef ne peut annuler que les commandes de table (ingredients epuises)" };
+      }
+      // Reason is mandatory for chef cancellation
+      if (!parsed.data.cancellation_reason) {
+        return { error: "Motif obligatoire - Veuillez indiquer la raison (ex: ingredients epuises)" };
+      }
+    }
+
+    // Create audit log for cancellation
+    await createAuditLog({
+      actionType: "cancel",
+      orderId: order.id,
+      orderNumber: order.order_number,
+      orderData: order as unknown as Record<string, unknown>,
+      reason: parsed.data.cancellation_reason ?? "Non specifie",
+    });
+  } else {
+    const canManage = await hasRole(PERMISSIONS.ORDERS_MANAGE);
+    if (!canManage) {
+      return { error: "Non autorise" };
+    }
+  }
+
+  const updateData: Record<string, unknown> = { status: newStatus };
+
+  if (newStatus === "cancelled") {
     updateData.cancellation_reason = parsed.data.cancellation_reason;
+    updateData.cancelled_at = new Date().toISOString();
   }
 
   const { error } = await supabase
@@ -173,6 +271,7 @@ export async function updateOrderStatus(input: unknown) {
 
   revalidatePath("/admin/orders");
   revalidatePath("/admin");
+  revalidatePath("/admin/kitchen");
   return { success: true };
 }
 
@@ -182,22 +281,26 @@ export async function getOrderAnalytics() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
+  // Exclude cancelled AND deleted orders from analytics
   const [todayRes, weekRes, monthRes] = await Promise.all([
     supabase
       .from("orders")
       .select("total")
       .gte("created_at", today.toISOString())
-      .neq("status", "cancelled"),
+      .neq("status", "cancelled")
+      .is("deleted_at", null),
     supabase
       .from("orders")
       .select("total")
       .gte("created_at", new Date(Date.now() - 7 * 86400000).toISOString())
-      .neq("status", "cancelled"),
+      .neq("status", "cancelled")
+      .is("deleted_at", null),
     supabase
       .from("orders")
       .select("total")
       .gte("created_at", new Date(Date.now() - 30 * 86400000).toISOString())
-      .neq("status", "cancelled"),
+      .neq("status", "cancelled")
+      .is("deleted_at", null),
   ]);
 
   type TotalRow = { total: number | null };
@@ -221,13 +324,18 @@ export async function getOrderAnalytics() {
   };
 }
 
-export async function getOrders(status?: string) {
+export async function getOrders(status?: string, includeDeleted = false) {
   const supabase = createAdminClient();
 
   let query = supabase
     .from("orders")
     .select("*")
     .order("created_at", { ascending: false });
+
+  // Exclude soft-deleted orders by default
+  if (!includeDeleted) {
+    query = query.is("deleted_at", null);
+  }
 
   if (status && status !== "all") {
     query = query.eq("status", status as "pending" | "confirmed" | "preparing" | "ready" | "delivering" | "completed" | "cancelled");
@@ -402,27 +510,50 @@ async function closeSessionIfAllPaid(sessionId: string): Promise<boolean> {
   return false;
 }
 
-// Mark order as paid (for admin/cashier)
+// Mark order as paid and completed (for cashier/admin only)
+// This is the ONLY way to mark an order as "completed"
+// Business rule: payment_status=paid => status=completed
 export async function markOrderAsPaid(orderId: string) {
-  const isAdmin = await isCurrentUserAdmin();
-  if (!isAdmin) {
-    return { error: "Non autorise" };
+  // Only cashiers and admins can validate payments
+  const canPay = await canValidatePayments();
+  if (!canPay) {
+    return { error: "Non autorise - Seuls les caissiers et administrateurs peuvent encaisser" };
   }
 
   const supabase = createAdminClient();
 
-  // Get order to check session
+  // Get order to check session and current status
   const { data: orderBefore } = await supabase
     .from("orders")
-    .select("table_session_id")
+    .select("table_session_id, status, payment_status")
     .eq("id", orderId)
     .single();
 
+  if (!orderBefore) {
+    return { error: "Commande non trouvee" };
+  }
+
+  // Don't allow paying cancelled orders
+  if (orderBefore.status === "cancelled") {
+    return { error: "Impossible d'encaisser une commande annulee" };
+  }
+
+  // Don't allow double payment
+  if (orderBefore.payment_status === "paid") {
+    return { error: "Cette commande est deja payee" };
+  }
+
+  const now = new Date().toISOString();
+
+  // Mark as paid AND completed simultaneously
+  // This is the core business rule: encaissement = completion
   const { data, error } = await supabase
     .from("orders")
     .update({
       payment_status: "paid",
-      paid_at: new Date().toISOString(),
+      paid_at: now,
+      status: "completed",
+      completed_at: now,
     } as never)
     .eq("id", orderId)
     .select()
@@ -435,12 +566,13 @@ export async function markOrderAsPaid(orderId: string) {
 
   // Check if all orders in session are paid and close session if so
   let sessionClosed = false;
-  if (orderBefore?.table_session_id) {
+  if (orderBefore.table_session_id) {
     sessionClosed = await closeSessionIfAllPaid(orderBefore.table_session_id);
   }
 
   revalidatePath("/admin/orders");
   revalidatePath("/admin/tables");
+  revalidatePath("/admin/kitchen");
   revalidatePath("/admin");
 
   return { success: true, data, sessionClosed };
@@ -492,4 +624,267 @@ export async function getPendingOrdersCount() {
   }
 
   return { count: count ?? 0 };
+}
+
+// ============================================
+// Admin-Only Order Management (with Audit)
+// ============================================
+
+// Soft delete an order (admin/super_admin only)
+// This marks the order as deleted but keeps it for audit trail
+export async function deleteOrder(orderId: string, reason: string) {
+  // Only admin and super_admin can delete orders
+  const canDelete = await hasRole(MANAGER_ROLES);
+  if (!canDelete) {
+    return { error: "Non autorise - Seuls les administrateurs peuvent supprimer des commandes" };
+  }
+
+  if (!reason || reason.trim().length < 5) {
+    return { error: "Motif obligatoire (minimum 5 caracteres)" };
+  }
+
+  const supabase = createAdminClient();
+  const profile = await getCurrentUserProfile();
+
+  // Get full order data before deletion for audit
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .eq("id", orderId)
+    .single();
+
+  if (!order) {
+    return { error: "Commande non trouvee" };
+  }
+
+  // Check if already deleted
+  if (order.deleted_at) {
+    return { error: "Cette commande est deja supprimee" };
+  }
+
+  // Create audit log BEFORE soft delete
+  await createAuditLog({
+    actionType: "delete",
+    orderId: order.id,
+    orderNumber: order.order_number,
+    orderData: order as unknown as Record<string, unknown>,
+    reason: reason.trim(),
+  });
+
+  // Soft delete the order
+  const { error } = await supabase
+    .from("orders")
+    .update({
+      deleted_at: new Date().toISOString(),
+      deleted_by: profile?.id,
+      deletion_reason: reason.trim(),
+    } as never)
+    .eq("id", orderId);
+
+  if (error) {
+    console.error("Error deleting order:", error);
+    return { error: error.message };
+  }
+
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/reports");
+  revalidatePath("/admin");
+
+  return { success: true };
+}
+
+// Modify a paid order (admin/super_admin only) - for error corrections
+export async function modifyPaidOrder(
+  orderId: string,
+  reason: string,
+  updates: {
+    items?: Array<{
+      id?: string; // Existing item ID to modify, or undefined for new
+      item_name: string;
+      item_price: number;
+      quantity: number;
+      delete?: boolean; // Set to true to remove this item
+    }>;
+    notes?: string;
+  }
+) {
+  // Only admin and super_admin can modify paid orders
+  const canModify = await hasRole(MANAGER_ROLES);
+  if (!canModify) {
+    return { error: "Non autorise - Seuls les administrateurs peuvent modifier des commandes payees" };
+  }
+
+  if (!reason || reason.trim().length < 5) {
+    return { error: "Motif obligatoire pour la modification (minimum 5 caracteres)" };
+  }
+
+  const supabase = createAdminClient();
+
+  // Get full order data before modification for audit
+  const { data: order } = await supabase
+    .from("orders")
+    .select("*, order_items(*)")
+    .eq("id", orderId)
+    .single();
+
+  if (!order) {
+    return { error: "Commande non trouvee" };
+  }
+
+  if (order.deleted_at) {
+    return { error: "Impossible de modifier une commande supprimee" };
+  }
+
+  // Track changes for audit
+  const changes: Record<string, { old: unknown; new: unknown }> = {};
+
+  // Handle item modifications if provided
+  if (updates.items && updates.items.length > 0) {
+    const oldItems = order.order_items;
+
+    for (const item of updates.items) {
+      if (item.delete && item.id) {
+        // Delete existing item
+        await supabase.from("order_items").delete().eq("id", item.id);
+      } else if (item.id) {
+        // Update existing item
+        await supabase
+          .from("order_items")
+          .update({
+            item_name: item.item_name,
+            item_price: item.item_price,
+            quantity: item.quantity,
+            line_total: item.item_price * item.quantity,
+          } as never)
+          .eq("id", item.id);
+      } else {
+        // Add new item
+        await supabase.from("order_items").insert({
+          order_id: orderId,
+          item_name: item.item_name,
+          item_price: item.item_price,
+          quantity: item.quantity,
+          line_total: item.item_price * item.quantity,
+        } as never);
+      }
+    }
+
+    // Get updated items for comparison
+    const { data: newItems } = await supabase
+      .from("order_items")
+      .select("*")
+      .eq("order_id", orderId);
+
+    changes.items = { old: oldItems, new: newItems };
+
+    // Recalculate totals
+    const newSubtotal = (newItems ?? []).reduce(
+      (sum, item) => sum + (item.line_total ?? 0),
+      0
+    );
+    const newTotal = newSubtotal + (order.delivery_fee ?? 0);
+
+    if (newSubtotal !== order.subtotal) {
+      changes.subtotal = { old: order.subtotal, new: newSubtotal };
+      changes.total = { old: order.total, new: newTotal };
+
+      await supabase
+        .from("orders")
+        .update({ subtotal: newSubtotal, total: newTotal } as never)
+        .eq("id", orderId);
+    }
+  }
+
+  // Handle notes update if provided
+  if (updates.notes !== undefined && updates.notes !== order.notes) {
+    changes.notes = { old: order.notes, new: updates.notes };
+    await supabase
+      .from("orders")
+      .update({ notes: updates.notes } as never)
+      .eq("id", orderId);
+  }
+
+  // Create audit log with detailed changes
+  await createAuditLog({
+    actionType: "modify",
+    orderId: order.id,
+    orderNumber: order.order_number,
+    orderData: order as unknown as Record<string, unknown>,
+    reason: reason.trim(),
+    changes,
+  });
+
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/reports");
+  revalidatePath("/admin");
+
+  return { success: true, changes };
+}
+
+// Get audit log for orders (admin only)
+export async function getOrderAuditLog(orderId?: string) {
+  const canView = await hasRole(MANAGER_ROLES);
+  if (!canView) {
+    return { error: "Non autorise" };
+  }
+
+  const supabase = createAdminClient();
+
+  let query = supabase
+    .from("order_audit_log")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (orderId) {
+    query = query.eq("order_id", orderId);
+  }
+
+  const { data, error } = await query.limit(100);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { data };
+}
+
+// Get all audit logs for security review (admin only)
+export async function getAllAuditLogs(filters?: {
+  actionType?: AuditActionType;
+  actorId?: string;
+  startDate?: string;
+  endDate?: string;
+}) {
+  const canView = await hasRole(MANAGER_ROLES);
+  if (!canView) {
+    return { error: "Non autorise" };
+  }
+
+  const supabase = createAdminClient();
+
+  let query = supabase
+    .from("order_audit_log")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (filters?.actionType) {
+    query = query.eq("action_type", filters.actionType);
+  }
+  if (filters?.actorId) {
+    query = query.eq("actor_id", filters.actorId);
+  }
+  if (filters?.startDate) {
+    query = query.gte("created_at", filters.startDate);
+  }
+  if (filters?.endDate) {
+    query = query.lte("created_at", filters.endDate);
+  }
+
+  const { data, error } = await query.limit(500);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { data };
 }

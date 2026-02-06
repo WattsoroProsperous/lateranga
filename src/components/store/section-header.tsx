@@ -23,13 +23,16 @@ export function SectionHeader({
       <h2
         className={cn(
           "font-display text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight mb-4",
-          dark ? "text-background" : "text-foreground"
+          dark ? "text-neutral-100" : "text-foreground"
         )}
       >
         {title}
       </h2>
       {description && (
-        <p className="text-base max-w-lg mx-auto text-muted-foreground leading-relaxed">
+        <p className={cn(
+          "text-base max-w-lg mx-auto leading-relaxed",
+          dark ? "text-neutral-400" : "text-muted-foreground"
+        )}>
           {description}
         </p>
       )}

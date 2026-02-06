@@ -338,7 +338,7 @@ export async function getIngredientRequests(status?: string) {
 
     const enrichedData = data.map(r => ({
       ...r,
-      requested_by_user: userMap.get(r.requested_by) ?? null,
+      requested_by_user: r.requested_by ? userMap.get(r.requested_by) ?? null : null,
       approved_by_user: r.approved_by ? userMap.get(r.approved_by) ?? null : null,
     }));
 
@@ -681,4 +681,364 @@ export async function decrementStockForOrder(items: Array<{
   }
 
   revalidatePath("/admin/stock");
+}
+
+// ============================================
+// Chef Immediate Withdrawal (No approval needed)
+// ============================================
+
+interface WithdrawResult {
+  success: boolean;
+  needs_approval?: boolean;
+  request_id?: string;
+  movement_id?: string;
+  new_quantity?: number;
+  message?: string;
+  error?: string;
+  available?: number;
+}
+
+export async function chefWithdrawIngredient(input: {
+  ingredient_id: string;
+  quantity: number;
+  note?: string;
+}): Promise<{ success?: boolean; needs_approval?: boolean; error?: string; message?: string; newQuantity?: number }> {
+  // Chef, admin, and super_admin can withdraw ingredients
+  const canWithdraw = await hasRole(["super_admin", "admin", "chef"] as UserRole[]);
+  if (!canWithdraw) return { error: "Non autorise - Seuls le chef et les administrateurs peuvent retirer des ingredients" };
+
+  const authSupabase = await createClient();
+  const { data: { user } } = await authSupabase.auth.getUser();
+  if (!user) return { error: "Non authentifie" };
+
+  const supabase = createAdminClient();
+
+  // Call the database function that handles threshold logic
+  const { data, error } = await supabase.rpc("chef_withdraw_ingredient", {
+    p_ingredient_id: input.ingredient_id,
+    p_quantity: input.quantity,
+    p_note: input.note ?? null,
+    p_chef_id: user.id,
+  });
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  const result = data as unknown as WithdrawResult;
+
+  if (!result.success) {
+    return { error: result.error ?? "Erreur lors du retrait" };
+  }
+
+  revalidatePath("/admin/stock/ingredients");
+  revalidatePath("/admin/kitchen");
+  revalidatePath("/admin/stock/requests");
+
+  if (result.needs_approval) {
+    return {
+      success: true,
+      needs_approval: true,
+      message: result.message ?? "Demande envoyée à l'admin pour approbation",
+    };
+  }
+
+  return {
+    success: true,
+    needs_approval: false,
+    newQuantity: result.new_quantity,
+    message: result.message,
+  };
+}
+
+// ============================================
+// Get Low Stock Alerts
+// ============================================
+
+export async function getLowStockAlerts() {
+  const supabase = createAdminClient();
+
+  const [stockItemsRes, ingredientsRes] = await Promise.all([
+    supabase
+      .from("stock_items")
+      .select("id, name, current_quantity, min_threshold, unit, menu_item_id")
+      .eq("is_active", true),
+    supabase
+      .from("ingredients")
+      .select("id, name, current_quantity, min_threshold, unit, ingredient_type")
+      .eq("is_active", true),
+  ]);
+
+  // Filter items that need restocking
+  const lowStockItems = (stockItemsRes.data ?? []).filter(
+    (item) => item.current_quantity <= item.min_threshold
+  ).map(item => ({
+    ...item,
+    item_type: "stock_item" as const,
+    needs_restock: true,
+  }));
+
+  const lowIngredients = (ingredientsRes.data ?? []).filter(
+    (item) => item.current_quantity <= item.min_threshold
+  ).map(item => ({
+    ...item,
+    item_type: "ingredient" as const,
+    needs_restock: true,
+  }));
+
+  return {
+    data: [...lowStockItems, ...lowIngredients],
+    stockItemsCount: lowStockItems.length,
+    ingredientsCount: lowIngredients.length,
+    totalCount: lowStockItems.length + lowIngredients.length,
+  };
+}
+
+// ============================================
+// Get ingredients for chef (with type info)
+// ============================================
+
+export async function getIngredientsForChef() {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("ingredients")
+    .select("id, name, description, current_quantity, unit, min_threshold, approval_threshold, ingredient_type")
+    .eq("is_active", true)
+    .order("name");
+
+  if (error) return { error: error.message };
+
+  // Group by type for easier UI rendering
+  const weighable = (data ?? []).filter(i => i.ingredient_type === "weighable");
+  const unit = (data ?? []).filter(i => i.ingredient_type === "unit");
+
+  return {
+    data: data ?? [],
+    weighable,
+    unit,
+  };
+}
+
+// ============================================
+// Get today's chef movements
+// ============================================
+
+export async function getTodayChefMovements() {
+  const supabase = createAdminClient();
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const { data: movements, error } = await supabase
+    .from("stock_movements")
+    .select(`
+      *,
+      ingredient:ingredients(id, name, unit)
+    `)
+    .eq("reference_type", "chef_withdrawal")
+    .gte("created_at", today.toISOString())
+    .order("created_at", { ascending: false });
+
+  if (error) return { error: error.message };
+
+  // Fetch user info separately
+  if (movements && movements.length > 0) {
+    const userIds = [...new Set(movements.filter(m => m.performed_by).map(m => m.performed_by))];
+
+    if (userIds.length > 0) {
+      const { data: users } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", userIds as string[]);
+
+      const userMap = new Map(users?.map(u => [u.id, u]) ?? []);
+
+      const enrichedData = movements.map(m => ({
+        ...m,
+        performed_by_user: m.performed_by ? userMap.get(m.performed_by) ?? null : null,
+      }));
+
+      return { data: enrichedData };
+    }
+  }
+
+  return { data: movements?.map(m => ({ ...m, performed_by_user: null })) ?? [] };
+}
+
+// ============================================
+// Get pending withdrawal requests (for admin)
+// ============================================
+
+export async function getPendingWithdrawalRequests() {
+  const isAdmin = await hasRole(["super_admin", "admin"] as UserRole[]);
+  if (!isAdmin) return { error: "Non autorise" };
+
+  const supabase = createAdminClient();
+
+  const { data: requests, error } = await supabase
+    .from("ingredient_requests")
+    .select(`
+      *,
+      ingredient:ingredients(id, name, unit, current_quantity, approval_threshold)
+    `)
+    .eq("status", "pending")
+    .eq("request_type", "withdrawal_approval")
+    .order("created_at", { ascending: true });
+
+  if (error) return { error: error.message };
+
+  // Fetch requester info
+  if (requests && requests.length > 0) {
+    const userIds = [...new Set(requests.filter(r => r.requested_by).map(r => r.requested_by))];
+
+    if (userIds.length > 0) {
+      const { data: users } = await supabase
+        .from("profiles")
+        .select("id, full_name")
+        .in("id", userIds as string[]);
+
+      const userMap = new Map(users?.map(u => [u.id, u]) ?? []);
+
+      const enrichedData = requests.map(r => ({
+        ...r,
+        requester: r.requested_by ? userMap.get(r.requested_by) ?? null : null,
+      }));
+
+      return { data: enrichedData };
+    }
+  }
+
+  return { data: requests?.map(r => ({ ...r, requester: null })) ?? [] };
+}
+
+// ============================================
+// Approve withdrawal request
+// ============================================
+
+export async function approveWithdrawalRequest(requestId: string) {
+  const isAdmin = await hasRole(["super_admin", "admin"] as UserRole[]);
+  if (!isAdmin) return { error: "Non autorise - Seuls les administrateurs peuvent approuver les demandes" };
+
+  const authSupabase = await createClient();
+  const { data: { user } } = await authSupabase.auth.getUser();
+  if (!user) return { error: "Non authentifie" };
+
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase.rpc("approve_withdrawal_request", {
+    p_request_id: requestId,
+    p_admin_id: user.id,
+  });
+
+  if (error) return { error: error.message };
+
+  const result = data as { success: boolean; error?: string; new_quantity?: number };
+
+  if (!result.success) {
+    return { error: result.error ?? "Erreur lors de l'approbation" };
+  }
+
+  revalidatePath("/admin/stock/requests");
+  revalidatePath("/admin/stock/ingredients");
+  revalidatePath("/admin/kitchen");
+
+  return { success: true, newQuantity: result.new_quantity };
+}
+
+// ============================================
+// Reject withdrawal request
+// ============================================
+
+export async function rejectWithdrawalRequest(requestId: string, reason?: string) {
+  const isAdmin = await hasRole(["super_admin", "admin"] as UserRole[]);
+  if (!isAdmin) return { error: "Non autorise - Seuls les administrateurs peuvent rejeter les demandes" };
+
+  const authSupabase = await createClient();
+  const { data: { user } } = await authSupabase.auth.getUser();
+  if (!user) return { error: "Non authentifie" };
+
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase.rpc("reject_withdrawal_request", {
+    p_request_id: requestId,
+    p_admin_id: user.id,
+    p_reason: reason ?? null,
+  });
+
+  if (error) return { error: error.message };
+
+  const result = data as { success: boolean; error?: string };
+
+  if (!result.success) {
+    return { error: result.error ?? "Erreur lors du rejet" };
+  }
+
+  revalidatePath("/admin/stock/requests");
+  revalidatePath("/admin/kitchen");
+
+  return { success: true };
+}
+
+// ============================================
+// Update ingredient approval threshold
+// ============================================
+
+export async function updateIngredientThreshold(input: {
+  ingredient_id: string;
+  approval_threshold: number | null;
+}) {
+  const isAdmin = await hasRole(["super_admin", "admin"] as UserRole[]);
+  if (!isAdmin) return { error: "Non autorise - Seuls les administrateurs peuvent modifier le seuil d'approbation" };
+
+  const supabase = createAdminClient();
+
+  const { error } = await supabase
+    .from("ingredients")
+    .update({
+      approval_threshold: input.approval_threshold,
+      updated_at: new Date().toISOString(),
+    } as never)
+    .eq("id", input.ingredient_id);
+
+  if (error) return { error: error.message };
+
+  revalidatePath("/admin/stock/ingredients");
+  return { success: true };
+}
+
+// ============================================
+// Bulk update ingredient thresholds
+// ============================================
+
+export async function bulkUpdateIngredientThresholds(
+  thresholds: { ingredient_id: string; approval_threshold: number | null }[]
+) {
+  const isAdmin = await hasRole(["super_admin", "admin"] as UserRole[]);
+  if (!isAdmin) return { error: "Non autorise" };
+
+  const supabase = createAdminClient();
+
+  const errors: string[] = [];
+
+  for (const item of thresholds) {
+    const { error } = await supabase
+      .from("ingredients")
+      .update({
+        approval_threshold: item.approval_threshold,
+        updated_at: new Date().toISOString(),
+      } as never)
+      .eq("id", item.ingredient_id);
+
+    if (error) {
+      errors.push(`${item.ingredient_id}: ${error.message}`);
+    }
+  }
+
+  if (errors.length > 0) {
+    return { error: errors.join(", "), partialSuccess: errors.length < thresholds.length };
+  }
+
+  revalidatePath("/admin/stock/ingredients");
+  return { success: true };
 }

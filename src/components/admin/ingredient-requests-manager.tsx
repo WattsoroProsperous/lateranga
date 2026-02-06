@@ -37,20 +37,22 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { Plus, ArrowLeft, Check, X, Clock, AlertTriangle, ChefHat, User } from "lucide-react";
+import { Plus, ArrowLeft, Check, X, Clock, AlertTriangle, ChefHat, User, ShieldAlert, Package } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
-import { createIngredientRequest, processIngredientRequest } from "@/actions/stock.actions";
+import { createIngredientRequest, processIngredientRequest, approveWithdrawalRequest, rejectWithdrawalRequest } from "@/actions/stock.actions";
 import { useCurrentUser } from "@/hooks/use-current-user";
 import type { Ingredient } from "@/types";
 
 interface IngredientRequestWithDetails {
   id: string;
   ingredient_id: string;
-  requested_by: string;
+  requested_by: string | null;
   quantity: number;
   reason: string | null;
+  notes: string | null;
   status: string;
+  request_type: string;
   approved_by: string | null;
   approved_at: string | null;
   rejection_reason?: string | null;
@@ -129,6 +131,26 @@ function getStatusBadge(status: string) {
   }
 }
 
+function getRequestTypeBadge(type: string) {
+  switch (type) {
+    case "withdrawal_approval":
+      return (
+        <Badge variant="outline" className="gap-1 border-amber-500 text-amber-600">
+          <ShieldAlert className="h-3 w-3" />
+          Retrait
+        </Badge>
+      );
+    case "stock_request":
+    default:
+      return (
+        <Badge variant="outline" className="gap-1">
+          <Package className="h-3 w-3" />
+          Approvisionnement
+        </Badge>
+      );
+  }
+}
+
 export function IngredientRequestsManager({
   initialRequests,
   ingredients,
@@ -199,17 +221,32 @@ export function IngredientRequestsManager({
     if (!selectedRequest) return;
 
     startTransition(async () => {
-      const result = await processIngredientRequest({
-        id: selectedRequest.id,
-        status: processAction,
-      });
+      let result;
+
+      // Handle withdrawal approval requests differently
+      if (selectedRequest.request_type === "withdrawal_approval") {
+        if (processAction === "approved") {
+          result = await approveWithdrawalRequest(selectedRequest.id);
+        } else {
+          result = await rejectWithdrawalRequest(selectedRequest.id);
+        }
+      } else {
+        // Regular stock request
+        result = await processIngredientRequest({
+          id: selectedRequest.id,
+          status: processAction,
+        });
+      }
+
       if (result.error) {
         toast.error(result.error);
         return;
       }
       toast.success(
         processAction === "approved"
-          ? "Demande approuvee - stock mis a jour"
+          ? selectedRequest.request_type === "withdrawal_approval"
+            ? "Retrait approuve - stock deduit"
+            : "Demande approuvee - stock mis a jour"
           : "Demande rejetee"
       );
       setShowProcessDialog(false);
@@ -318,6 +355,7 @@ export function IngredientRequestsManager({
               <TableHeader>
                 <TableRow>
                   <TableHead>Date</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Ingredient</TableHead>
                   <TableHead className="text-center">Quantite</TableHead>
                   <TableHead>Demandeur</TableHead>
@@ -332,7 +370,7 @@ export function IngredientRequestsManager({
                 {filteredRequests.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={canProcessRequest && activeTab === "pending" ? 7 : 6}
+                      colSpan={canProcessRequest && activeTab === "pending" ? 8 : 7}
                       className="text-center py-8 text-muted-foreground"
                     >
                       <ChefHat className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -344,6 +382,9 @@ export function IngredientRequestsManager({
                     <TableRow key={request.id}>
                       <TableCell className="text-sm">
                         {formatDate(request.created_at)}
+                      </TableCell>
+                      <TableCell>
+                        {getRequestTypeBadge(request.request_type)}
                       </TableCell>
                       <TableCell>
                         <div>
@@ -366,7 +407,7 @@ export function IngredientRequestsManager({
                         </div>
                       </TableCell>
                       <TableCell className="max-w-[200px] truncate">
-                        {request.reason || "-"}
+                        {request.reason || request.notes || "-"}
                       </TableCell>
                       <TableCell className="text-center">
                         {getStatusBadge(request.status)}

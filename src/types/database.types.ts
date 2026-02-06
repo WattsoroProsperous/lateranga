@@ -29,9 +29,13 @@ export type TableLocation = "interieur" | "terrasse" | "vip";
 
 export type StockUnit = "unit" | "kg" | "g" | "l" | "ml" | "piece";
 
-export type StockMovementType = "sale" | "restock" | "adjustment" | "request" | "waste" | "return";
+export type StockMovementType = "sale" | "restock" | "adjustment" | "request" | "waste" | "return" | "withdrawal";
+
+export type IngredientType = "unit" | "weighable";
 
 export type RequestStatus = "pending" | "approved" | "rejected";
+
+export type RequestType = "stock_request" | "withdrawal_approval";
 
 export type PaymentMethod = "cash" | "card" | "wave" | "orange_money" | "mtn_money";
 
@@ -45,6 +49,8 @@ export type NotificationType =
   | "ingredient_request"
   | "payment_validated"
   | "table_order";
+
+export type AuditActionType = "delete" | "modify" | "cancel";
 
 // ============================================
 // Database Interface
@@ -196,6 +202,13 @@ export interface Database {
           completed_at: string | null;
           cancelled_at: string | null;
           cancellation_reason: string | null;
+          // Soft delete fields (admin only)
+          deleted_at: string | null;
+          deleted_by: string | null;
+          deletion_reason: string | null;
+          // Cost tracking for profit calculation
+          total_cost: number;
+          profit: number;
           created_at: string;
           updated_at: string;
         };
@@ -542,7 +555,9 @@ export interface Database {
           unit: StockUnit;
           price_per_unit: number;
           min_threshold: number;
+          approval_threshold: number | null;
           supplier: string | null;
+          ingredient_type: IngredientType;
           is_active: boolean;
           created_at: string;
           updated_at: string;
@@ -554,7 +569,9 @@ export interface Database {
           unit?: StockUnit;
           price_per_unit: number;
           min_threshold?: number;
+          approval_threshold?: number | null;
           supplier?: string | null;
+          ingredient_type?: IngredientType;
           is_active?: boolean;
         };
         Update: {
@@ -564,7 +581,9 @@ export interface Database {
           unit?: StockUnit;
           price_per_unit?: number;
           min_threshold?: number;
+          approval_threshold?: number | null;
           supplier?: string | null;
+          ingredient_type?: IngredientType;
           is_active?: boolean;
         };
         Relationships: [];
@@ -607,10 +626,12 @@ export interface Database {
         Row: {
           id: string;
           ingredient_id: string;
-          requested_by: string;
+          requested_by: string | null;
           quantity: number;
           reason: string | null;
+          notes: string | null;
           status: RequestStatus;
+          request_type: RequestType;
           approved_by: string | null;
           approved_at: string | null;
           rejection_reason: string | null;
@@ -619,16 +640,19 @@ export interface Database {
         };
         Insert: {
           ingredient_id: string;
-          requested_by: string;
+          requested_by?: string | null;
           quantity: number;
           reason?: string | null;
+          notes?: string | null;
           status?: RequestStatus;
+          request_type?: RequestType;
         };
         Update: {
           status?: RequestStatus;
           approved_by?: string | null;
           approved_at?: string | null;
           rejection_reason?: string | null;
+          notes?: string | null;
         };
         Relationships: [
           {
@@ -731,6 +755,92 @@ export interface Database {
           },
         ];
       };
+      // ============================================
+      // Audit Log (Security)
+      // ============================================
+      order_audit_log: {
+        Row: {
+          id: string;
+          action_type: AuditActionType;
+          actor_id: string;
+          actor_role: string;
+          actor_name: string | null;
+          order_id: string;
+          order_number: string;
+          order_data: Record<string, unknown>;
+          reason: string;
+          changes: Record<string, unknown> | null;
+          created_at: string;
+        };
+        Insert: {
+          action_type: AuditActionType;
+          actor_id: string;
+          actor_role: string;
+          actor_name?: string | null;
+          order_id: string;
+          order_number: string;
+          order_data: Record<string, unknown>;
+          reason: string;
+          changes?: Record<string, unknown> | null;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "order_audit_log_actor_id_fkey";
+            columns: ["actor_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      // ============================================
+      // Daily Summaries (Profit Tracking)
+      // ============================================
+      daily_summaries: {
+        Row: {
+          id: string;
+          date: string;
+          total_revenue: number;
+          total_cost: number;
+          total_profit: number;
+          total_orders: number;
+          revenue_by_category: Record<string, number>;
+          cost_by_category: Record<string, number>;
+          orders_by_hour: Record<string, number>;
+          top_items: Array<{ name: string; quantity: number; revenue: number }>;
+          stock_items_cost: number;
+          ingredients_cost: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          date: string;
+          total_revenue?: number;
+          total_cost?: number;
+          total_profit?: number;
+          total_orders?: number;
+          revenue_by_category?: Record<string, number>;
+          cost_by_category?: Record<string, number>;
+          orders_by_hour?: Record<string, number>;
+          top_items?: Array<{ name: string; quantity: number; revenue: number }>;
+          stock_items_cost?: number;
+          ingredients_cost?: number;
+        };
+        Update: {
+          total_revenue?: number;
+          total_cost?: number;
+          total_profit?: number;
+          total_orders?: number;
+          revenue_by_category?: Record<string, number>;
+          cost_by_category?: Record<string, number>;
+          orders_by_hour?: Record<string, number>;
+          top_items?: Array<{ name: string; quantity: number; revenue: number }>;
+          stock_items_cost?: number;
+          ingredients_cost?: number;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -792,6 +902,97 @@ export interface Database {
         Args: { p_menu_item_id: string };
         Returns: number;
       };
+      calculate_order_cost: {
+        Args: { p_order_id: string };
+        Returns: number;
+      };
+      chef_withdraw_ingredient: {
+        Args: {
+          p_ingredient_id: string;
+          p_quantity: number;
+          p_note?: string | null;
+          p_chef_id?: string | null;
+        };
+        Returns: {
+          success: boolean;
+          needs_approval?: boolean;
+          request_id?: string;
+          movement_id?: string;
+          new_quantity?: number;
+          message?: string;
+          error?: string;
+          available?: number;
+        };
+      };
+      approve_withdrawal_request: {
+        Args: {
+          p_request_id: string;
+          p_admin_id: string;
+        };
+        Returns: {
+          success: boolean;
+          movement_id?: string;
+          new_quantity?: number;
+          error?: string;
+        };
+      };
+      reject_withdrawal_request: {
+        Args: {
+          p_request_id: string;
+          p_admin_id: string;
+          p_reason?: string | null;
+        };
+        Returns: {
+          success: boolean;
+          error?: string;
+        };
+      };
+      get_daily_profit: {
+        Args: { p_days?: number };
+        Returns: {
+          date: string;
+          revenue: number;
+          cost: number;
+          profit: number;
+          orders: number;
+          profit_margin: number;
+        }[];
+      };
+      get_peak_hours_analysis: {
+        Args: { p_days?: number };
+        Returns: {
+          hour: number;
+          total_orders: number;
+          avg_orders_per_day: number;
+        }[];
+      };
+      get_item_profit_margins: {
+        Args: Record<string, never>;
+        Returns: {
+          item_id: string;
+          item_name: string;
+          category_name: string;
+          sale_price: number;
+          cost_price: number;
+          profit: number;
+          profit_margin: number;
+          total_sold: number;
+          total_revenue: number;
+          total_profit: number;
+        }[];
+      };
+      check_and_notify_low_stock: {
+        Args: Record<string, never>;
+        Returns: {
+          item_type: string;
+          item_id: string;
+          name: string;
+          current_quantity: number;
+          min_threshold: number;
+          unit: string;
+          needs_restock: boolean;
+        }[];
+      };
     };
     Enums: {
       order_status: OrderStatus;
@@ -842,3 +1043,5 @@ export type RecipeIngredient = Tables<"recipe_ingredients">;
 export type IngredientRequest = Tables<"ingredient_requests">;
 export type StockMovement = Tables<"stock_movements">;
 export type Notification = Tables<"notifications">;
+export type OrderAuditLog = Tables<"order_audit_log">;
+export type DailySummary = Tables<"daily_summaries">;

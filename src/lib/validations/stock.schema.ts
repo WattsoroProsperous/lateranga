@@ -33,6 +33,7 @@ export const createIngredientSchema = z.object({
   unit: z.enum(stockUnits).default("kg"),
   price_per_unit: z.number().min(0, "Prix invalide").default(0),
   min_threshold: z.number().min(0, "Seuil invalide").default(1),
+  approval_threshold: z.number().min(0, "Seuil invalide").optional().nullable(),
   supplier: z.string().optional().nullable(),
   is_active: z.boolean().default(true),
 });
@@ -45,6 +46,7 @@ export const updateIngredientSchema = z.object({
   unit: z.enum(stockUnits).optional(),
   price_per_unit: z.number().min(0, "Prix invalide").optional(),
   min_threshold: z.number().min(0, "Seuil invalide").optional(),
+  approval_threshold: z.number().min(0, "Seuil invalide").optional().nullable(),
   supplier: z.string().optional().nullable(),
   is_active: z.boolean().optional(),
 });

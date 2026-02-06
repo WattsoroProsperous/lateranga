@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   LineChart,
   Line,
@@ -16,12 +17,15 @@ import {
   Legend,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { formatXOF } from "@/lib/utils";
 import {
   TrendingUp,
   ShoppingBag,
   DollarSign,
   Clock,
+  PiggyBank,
+  ArrowRight,
 } from "lucide-react";
 import type {
   DailyRevenueData,
@@ -47,11 +51,20 @@ export function ReportsDashboard({
 }: ReportsDashboardProps) {
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="font-display text-2xl font-bold">Rapports</h1>
-        <p className="text-muted-foreground">
-          Analyse des 30 derniers jours
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-display text-2xl font-bold">Rapports</h1>
+          <p className="text-muted-foreground">
+            Analyse des 30 derniers jours
+          </p>
+        </div>
+        <Link href="/admin/reports/profit">
+          <Button className="gap-2">
+            <PiggyBank className="size-4" />
+            Analyse des Benefices
+            <ArrowRight className="size-4" />
+          </Button>
+        </Link>
       </div>
 
       {/* Summary Cards */}

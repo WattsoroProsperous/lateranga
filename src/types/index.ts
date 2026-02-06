@@ -17,6 +17,7 @@ export type RecipeIngredient = Database["public"]["Tables"]["recipe_ingredients"
 export type IngredientRequest = Database["public"]["Tables"]["ingredient_requests"]["Row"];
 export type StockMovement = Database["public"]["Tables"]["stock_movements"]["Row"];
 export type Notification = Database["public"]["Tables"]["notifications"]["Row"];
+export type DailySummary = Database["public"]["Tables"]["daily_summaries"]["Row"];
 
 // Re-export enums
 export type {
@@ -29,9 +30,12 @@ export type {
   StockUnit,
   StockMovementType,
   RequestStatus,
+  RequestType,
   PaymentMethod,
   PaymentStatus,
   NotificationType,
+  AuditActionType,
+  IngredientType,
 } from "./database.types";
 
 // Cart types (client-side)

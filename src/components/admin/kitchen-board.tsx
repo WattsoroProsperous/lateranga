@@ -2,7 +2,8 @@
 
 import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Clock, ChefHat, CheckCircle, XCircle, Bell, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { Clock, ChefHat, CheckCircle, XCircle, Bell, AlertTriangle, Package } from "lucide-react";
 import { cn, formatXOF } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -186,6 +187,12 @@ export function KitchenBoard({ initialOrders }: KitchenBoardProps) {
                 </span>
               </div>
             )}
+            <Link href="/admin/kitchen/ingredients">
+              <Button variant="outline" className="gap-2">
+                <Package className="size-4" />
+                Retrait Ingredients
+              </Button>
+            </Link>
           </div>
         </div>
       </div>

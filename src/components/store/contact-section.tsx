@@ -7,7 +7,7 @@ export function ContactSection() {
   return (
     <section
       id="contact"
-      className="py-20 md:py-28 px-4 sm:px-6 bg-foreground text-background"
+      className="py-20 md:py-28 px-4 sm:px-6 bg-neutral-900 dark:bg-neutral-950 text-neutral-100"
     >
       <Container>
         <SectionHeader
@@ -19,7 +19,7 @@ export function ContactSection() {
 
         <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6">
           {/* Map */}
-          <div className="rounded-2xl overflow-hidden min-h-[400px] border border-background/10">
+          <div className="rounded-2xl overflow-hidden min-h-[400px] border border-white/10">
             <iframe
               src="https://maps.google.com/maps?q=LA+TERANGA+Treichville+Abidjan&t=&z=17&ie=UTF8&iwloc=&output=embed"
               className="w-full h-full min-h-[400px] border-0 grayscale contrast-110"
@@ -30,11 +30,11 @@ export function ContactSection() {
           </div>
 
           {/* Contact Card */}
-          <div className="bg-background/5 border border-background/10 p-8 sm:p-10 rounded-2xl">
-            <h3 className="font-display text-2xl font-bold text-background mb-2">
+          <div className="bg-white/5 border border-white/10 p-8 sm:p-10 rounded-2xl">
+            <h3 className="font-display text-2xl font-bold text-neutral-100 mb-2">
               Informations
             </h3>
-            <p className="text-muted-foreground text-sm mb-8 leading-relaxed">
+            <p className="text-neutral-400 text-sm mb-8 leading-relaxed">
               Restaurant africain sénégalais — Cuisine authentique depuis des
               années.
             </p>
