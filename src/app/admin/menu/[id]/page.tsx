@@ -78,6 +78,14 @@ export default function MenuItemEditPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
+    // Validation côté client
+    if (!form.category_id) {
+      toast.error("Veuillez sélectionner une catégorie");
+      return;
+    }
+
+    console.log("[Menu Form] Submitting with category_id:", form.category_id);
+
     const payload = {
       name: form.name,
       description: form.description || null,
@@ -185,7 +193,10 @@ export default function MenuItemEditPage() {
             <Label htmlFor="category">Categorie</Label>
             <Select
               value={form.category_id}
-              onValueChange={(v) => setForm({ ...form, category_id: v })}
+              onValueChange={(v) => {
+                console.log("[Menu Form] Category selected:", v);
+                setForm({ ...form, category_id: v });
+              }}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Selectionner une categorie" />
