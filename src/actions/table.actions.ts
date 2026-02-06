@@ -188,6 +188,29 @@ export async function getActiveSession(tableId: string): Promise<TableSession | 
   return data;
 }
 
+// Get the most recent session for a table (active or ended within last 24 hours)
+// Used for the orders page to show receipts after session ends
+export async function getLastSession(tableId: string): Promise<TableSession | null> {
+  const supabase = createAdminClient();
+  const twentyFourHoursAgo = new Date();
+  twentyFourHoursAgo.setHours(twentyFourHoursAgo.getHours() - 24);
+
+  const { data, error } = await supabase
+    .from("table_sessions")
+    .select("*")
+    .eq("table_id", tableId)
+    .gte("created_at", twentyFourHoursAgo.toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error) {
+    return null;
+  }
+
+  return data;
+}
+
 export async function getSessionByToken(sessionToken: string): Promise<{
   session: TableSession | null;
   table: RestaurantTable | null;
@@ -216,6 +239,7 @@ export async function createTableSession(tableToken: string): Promise<{
   session?: TableSession;
   table?: RestaurantTable;
   error?: string;
+  sessionInProgress?: boolean;
 }> {
   const supabase = createAdminClient();
 
@@ -231,12 +255,25 @@ export async function createTableSession(tableToken: string): Promise<{
     return { error: "Table non trouvee ou inactive" };
   }
 
-  // Close any existing active sessions for this table
-  await supabase
+  // Check if there's an active session for this table
+  const { data: existingSession } = await supabase
     .from("table_sessions")
-    .update({ is_active: false, ended_at: new Date().toISOString() })
+    .select("*")
     .eq("table_id", table.id)
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .gt("expires_at", new Date().toISOString())
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (existingSession) {
+    // Session already in progress - don't create a new one
+    return {
+      table,
+      session: existingSession,
+      sessionInProgress: true
+    };
+  }
 
   // Create new session (3 hours)
   const expiresAt = new Date();
@@ -276,6 +313,71 @@ export async function endTableSession(sessionId: string): Promise<{ success: boo
 
   revalidatePath("/admin/tables");
   return { success: true };
+}
+
+// Validate a session token for a specific table
+export async function validateSessionToken(
+  tableId: string,
+  sessionToken: string
+): Promise<{
+  valid: boolean;
+  session?: TableSession;
+  reason?: "invalid" | "expired" | "ended" | "wrong_table";
+}> {
+  const supabase = createAdminClient();
+
+  // Get session by token
+  const { data: session, error } = await supabase
+    .from("table_sessions")
+    .select("*")
+    .eq("session_token", sessionToken)
+    .single();
+
+  if (error || !session) {
+    return { valid: false, reason: "invalid" };
+  }
+
+  // Check if session belongs to this table
+  if (session.table_id !== tableId) {
+    return { valid: false, reason: "wrong_table" };
+  }
+
+  // Check if session is ended
+  if (!session.is_active || session.ended_at) {
+    return { valid: false, session, reason: "ended" };
+  }
+
+  // Check if session is expired
+  if (new Date(session.expires_at) < new Date()) {
+    return { valid: false, session, reason: "expired" };
+  }
+
+  return { valid: true, session };
+}
+
+// Check if a session is still active (for client-side polling)
+export async function checkSessionStatus(sessionId: string): Promise<{
+  isActive: boolean;
+  endedAt: string | null;
+}> {
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("table_sessions")
+    .select("is_active, ended_at, expires_at")
+    .eq("id", sessionId)
+    .single();
+
+  if (error || !data) {
+    return { isActive: false, endedAt: null };
+  }
+
+  // Check if session is expired
+  const isExpired = new Date(data.expires_at) < new Date();
+
+  return {
+    isActive: data.is_active && !isExpired,
+    endedAt: data.ended_at,
+  };
 }
 
 // ============================================

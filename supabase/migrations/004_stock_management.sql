@@ -294,7 +294,7 @@ CREATE POLICY "Managers manage recipes" ON recipe_ingredients
 CREATE POLICY "Staff read requests" ON ingredient_requests
   FOR SELECT USING (is_staff());
 CREATE POLICY "Chef create requests" ON ingredient_requests
-  FOR INSERT WITH CHECK (user_has_role(ARRAY['admin', 'super_admin', 'chef']::user_role[]));
+  FOR INSERT WITH CHECK (user_has_role(ARRAY['admin', 'super_admin', 'chef']));
 CREATE POLICY "Managers process requests" ON ingredient_requests
   FOR UPDATE USING (is_manager());
 

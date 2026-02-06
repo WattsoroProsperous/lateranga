@@ -122,7 +122,7 @@ ALTER TABLE table_sessions ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public read active tables" ON restaurant_tables
   FOR SELECT USING (is_active = true);
 CREATE POLICY "Staff manage tables" ON restaurant_tables
-  FOR ALL USING (user_has_role(ARRAY['admin', 'super_admin', 'cashier']::user_role[]));
+  FOR ALL USING (user_has_role(ARRAY['admin', 'super_admin', 'cashier']));
 
 -- Table Sessions - Public can read/create via functions, staff can manage
 CREATE POLICY "Public read sessions" ON table_sessions

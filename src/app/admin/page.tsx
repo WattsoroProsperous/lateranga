@@ -1,7 +1,9 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DashboardStats } from "@/components/admin/dashboard-stats";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { Bell, ArrowRight } from "lucide-react";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -81,8 +83,45 @@ export default async function AdminDashboardPage() {
 
   const recentOrders = (recentData ?? []) as RecentOrder[];
 
+  // Get new pending orders (last 30 minutes)
+  const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { count: newOrdersCount } = await supabase
+    .from("orders")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending")
+    .gte("created_at", thirtyMinutesAgo);
+
+  const hasNewOrders = (newOrdersCount ?? 0) > 0;
+
   return (
     <div className="space-y-6">
+      {/* New Orders Alert */}
+      {hasNewOrders && (
+        <Card className="p-4 bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="size-10 bg-amber-500 rounded-full flex items-center justify-center animate-pulse">
+                <Bell className="size-5 text-white" />
+              </div>
+              <div>
+                <p className="font-semibold text-amber-800 dark:text-amber-200">
+                  {newOrdersCount} nouvelle{(newOrdersCount ?? 0) > 1 ? "s" : ""} commande{(newOrdersCount ?? 0) > 1 ? "s" : ""}!
+                </p>
+                <p className="text-sm text-amber-600 dark:text-amber-300">
+                  Des commandes attendent d&apos;etre traitees
+                </p>
+              </div>
+            </div>
+            <Button asChild className="bg-amber-600 hover:bg-amber-700">
+              <Link href="/admin/orders?status=pending">
+                Voir les commandes
+                <ArrowRight className="size-4 ml-2" />
+              </Link>
+            </Button>
+          </div>
+        </Card>
+      )}
+
       <DashboardStats stats={stats} />
 
       <Card className="p-6">

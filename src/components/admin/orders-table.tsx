@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { formatXOF } from "@/lib/utils";
+import { formatXOF, cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -21,9 +21,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Eye, RefreshCw } from "lucide-react";
+import { Eye, RefreshCw, CreditCard, Check } from "lucide-react";
 import Link from "next/link";
 import type { Order, OrderStatus } from "@/types";
+import { markOrderAsPaid } from "@/actions/order.actions";
 
 const statusLabels: Record<string, string> = {
   pending: "En attente",
@@ -55,6 +56,18 @@ const allStatuses: OrderStatus[] = [
   "cancelled",
 ];
 
+const paymentStatusLabels: Record<string, string> = {
+  pending: "A payer",
+  paid: "Payee",
+  refunded: "Remboursee",
+};
+
+const paymentStatusColors: Record<string, string> = {
+  pending: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+  paid: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+  refunded: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+};
+
 interface OrdersTableProps {
   orders: Order[];
 }
@@ -63,6 +76,7 @@ export function OrdersTable({ orders: initialOrders }: OrdersTableProps) {
   const [orders, setOrders] = useState(initialOrders);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [updating, setUpdating] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
 
   const filteredOrders =
     filterStatus === "all"
@@ -97,6 +111,22 @@ export function OrdersTable({ orders: initialOrders }: OrdersTableProps) {
     if (data) setOrders(data as Order[]);
   }
 
+  function handleMarkAsPaid(orderId: string) {
+    startTransition(async () => {
+      const result = await markOrderAsPaid(orderId);
+      if (result.error) {
+        toast.error(result.error);
+      } else {
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.id === orderId ? { ...o, payment_status: "paid" } : o
+          )
+        );
+        toast.success("Commande marquee comme payee");
+      }
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -127,77 +157,102 @@ export function OrdersTable({ orders: initialOrders }: OrdersTableProps) {
               <TableHead>N° Commande</TableHead>
               <TableHead>Client</TableHead>
               <TableHead>Statut</TableHead>
+              <TableHead>Paiement</TableHead>
               <TableHead className="text-right">Total</TableHead>
               <TableHead>Date</TableHead>
-              <TableHead className="w-12" />
+              <TableHead className="w-24" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {filteredOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
                   Aucune commande trouvée
                 </TableCell>
               </TableRow>
             ) : (
-              filteredOrders.map((order) => (
-                <TableRow key={order.id}>
-                  <TableCell className="font-medium">
-                    {order.order_number}
-                  </TableCell>
-                  <TableCell>
-                    <div>
-                      <p className="font-medium">{order.client_name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {order.client_phone}
-                      </p>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Select
-                      value={order.status}
-                      onValueChange={(v) =>
-                        handleStatusChange(order.id, v as OrderStatus)
-                      }
-                      disabled={updating === order.id}
-                    >
-                      <SelectTrigger className="w-40 h-8">
-                        <Badge
-                          variant="secondary"
-                          className={statusColors[order.status]}
-                        >
-                          {statusLabels[order.status]}
+              filteredOrders.map((order) => {
+                const paymentStatus = order.payment_status ?? "pending";
+                const isPaid = paymentStatus === "paid";
+
+                return (
+                  <TableRow key={order.id}>
+                    <TableCell className="font-medium">
+                      {order.order_number}
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <p className="font-medium">{order.client_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {order.client_phone}
+                        </p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        value={order.status}
+                        onValueChange={(v) =>
+                          handleStatusChange(order.id, v as OrderStatus)
+                        }
+                        disabled={updating === order.id}
+                      >
+                        <SelectTrigger className="w-40 h-8">
+                          <Badge
+                            variant="secondary"
+                            className={statusColors[order.status]}
+                          >
+                            {statusLabels[order.status]}
+                          </Badge>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {allStatuses.map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {statusLabels[s]}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      {isPaid ? (
+                        <Badge variant="secondary" className={paymentStatusColors[paymentStatus]}>
+                          <Check className="size-3 mr-1" />
+                          {paymentStatusLabels[paymentStatus]}
                         </Badge>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {allStatuses.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {statusLabels[s]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell className="text-right font-medium">
-                    {formatXOF(order.total ?? 0)}
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {new Date(order.created_at).toLocaleDateString("fr-CI", {
-                      day: "2-digit",
-                      month: "short",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </TableCell>
-                  <TableCell>
-                    <Button variant="ghost" size="icon" asChild>
-                      <Link href={`/admin/orders/${order.id}`}>
-                        <Eye className="size-4" />
-                      </Link>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => handleMarkAsPaid(order.id)}
+                          disabled={isPending || order.status === "cancelled"}
+                        >
+                          <CreditCard className="size-3 mr-1" />
+                          Encaisser
+                        </Button>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-medium">
+                      {formatXOF(order.total ?? 0)}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {new Date(order.created_at).toLocaleDateString("fr-CI", {
+                        day: "2-digit",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="icon" asChild>
+                        <Link href={`/admin/orders/${order.id}`}>
+                          <Eye className="size-4" />
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>

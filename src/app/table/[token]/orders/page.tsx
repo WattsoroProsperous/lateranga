@@ -1,12 +1,12 @@
-import { notFound } from "next/navigation";
-import { getTableByToken, getActiveSession } from "@/actions/table.actions";
-import { getSessionOrders } from "@/actions/order.actions";
-import { TableOrdersView } from "@/components/table/table-orders-view";
+import { notFound, redirect } from "next/navigation";
+import { getTableByToken, getActiveSession, getLastSession } from "@/actions/table.actions";
 
 interface TableOrdersPageProps {
   params: Promise<{ token: string }>;
 }
 
+// This route redirects to the session-specific orders URL
+// This ensures all users go through the proper session flow
 export default async function TableOrdersPage({ params }: TableOrdersPageProps) {
   const { token } = await params;
 
@@ -16,22 +16,18 @@ export default async function TableOrdersPage({ params }: TableOrdersPageProps) 
     notFound();
   }
 
-  // Check for active session
-  const session = await getActiveSession(table.id);
+  // First try to get active session
+  let session = await getActiveSession(table.id);
+
+  // If no active session, try to get the last session (for viewing receipts)
   if (!session) {
-    notFound();
+    session = await getLastSession(table.id);
+    if (!session) {
+      // No session at all, redirect to table welcome page
+      redirect(`/table/${token}`);
+    }
   }
 
-  // Get orders for this session
-  const ordersResult = await getSessionOrders(session.id);
-  const orders = ordersResult.data ?? [];
-
-  return (
-    <TableOrdersView
-      table={table}
-      session={session}
-      orders={orders}
-      tableToken={token}
-    />
-  );
+  // Redirect to session-specific orders URL
+  redirect(`/table/${token}/s/${session.session_token}/orders`);
 }

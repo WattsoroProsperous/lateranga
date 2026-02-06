@@ -5,7 +5,7 @@
 -- ============================================
 -- Admin User (for local development)
 -- Email: admin@lateranga.ci
--- Password: Admin123!
+-- Password: Admin1234
 -- ============================================
 
 -- Create admin user in auth.users
@@ -15,6 +15,14 @@ INSERT INTO auth.users (
   email,
   encrypted_password,
   email_confirmed_at,
+  confirmation_token,
+  recovery_token,
+  email_change,
+  email_change_token_new,
+  email_change_token_current,
+  phone_change,
+  phone_change_token,
+  reauthentication_token,
   raw_app_meta_data,
   raw_user_meta_data,
   created_at,
@@ -25,8 +33,16 @@ INSERT INTO auth.users (
   'a0000000-0000-0000-0000-000000000001',
   '00000000-0000-0000-0000-000000000000',
   'admin@lateranga.ci',
-  crypt('Admin123!', gen_salt('bf')),
+  '$2a$06$D61ZoYHcBCahpbPRwneLVucIkbKGZ0o/L9tebClhWoL8PGCToPLpa', -- Admin1234
   NOW(),
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
   '{"provider":"email","providers":["email"]}',
   '{"full_name":"Admin La Teranga"}',
   NOW(),
@@ -35,10 +51,181 @@ INSERT INTO auth.users (
   'authenticated'
 ) ON CONFLICT (id) DO NOTHING;
 
+-- Create admin identity
+INSERT INTO auth.identities (
+  id,
+  user_id,
+  identity_data,
+  provider,
+  provider_id,
+  last_sign_in_at,
+  created_at,
+  updated_at
+) VALUES (
+  'a0000000-0000-0000-0000-000000000001',
+  'a0000000-0000-0000-0000-000000000001',
+  '{"sub":"a0000000-0000-0000-0000-000000000001","email":"admin@lateranga.ci","email_verified":true}',
+  'email',
+  'admin@lateranga.ci',
+  NOW(),
+  NOW(),
+  NOW()
+) ON CONFLICT (id) DO NOTHING;
+
 -- Create admin profile
 INSERT INTO profiles (id, full_name, role)
 VALUES ('a0000000-0000-0000-0000-000000000001', 'Admin La Teranga', 'admin')
 ON CONFLICT (id) DO UPDATE SET role = 'admin';
+
+-- ============================================
+-- Cashier User (for local development)
+-- Email: caisse@lateranga.ci
+-- Password: Caisse1234
+-- ============================================
+
+-- Create cashier user in auth.users
+INSERT INTO auth.users (
+  id,
+  instance_id,
+  email,
+  encrypted_password,
+  email_confirmed_at,
+  confirmation_token,
+  recovery_token,
+  email_change,
+  email_change_token_new,
+  email_change_token_current,
+  phone_change,
+  phone_change_token,
+  reauthentication_token,
+  raw_app_meta_data,
+  raw_user_meta_data,
+  created_at,
+  updated_at,
+  role,
+  aud
+) VALUES (
+  'a0000000-0000-0000-0000-000000000002',
+  '00000000-0000-0000-0000-000000000000',
+  'caisse@lateranga.ci',
+  '$2a$06$OVAgKmh3KR01cY3ewp1bJO1QyA0RkDGR1POnYhygGMJj/HUTRascu', -- Caisse1234
+  NOW(),
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '{"provider":"email","providers":["email"]}',
+  '{"full_name":"Caissiere La Teranga"}',
+  NOW(),
+  NOW(),
+  'authenticated',
+  'authenticated'
+) ON CONFLICT (id) DO NOTHING;
+
+-- Create cashier identity
+INSERT INTO auth.identities (
+  id,
+  user_id,
+  identity_data,
+  provider,
+  provider_id,
+  last_sign_in_at,
+  created_at,
+  updated_at
+) VALUES (
+  'a0000000-0000-0000-0000-000000000002',
+  'a0000000-0000-0000-0000-000000000002',
+  '{"sub":"a0000000-0000-0000-0000-000000000002","email":"caisse@lateranga.ci","email_verified":true}',
+  'email',
+  'caisse@lateranga.ci',
+  NOW(),
+  NOW(),
+  NOW()
+) ON CONFLICT (id) DO NOTHING;
+
+-- Create cashier profile
+INSERT INTO profiles (id, full_name, phone, role)
+VALUES ('a0000000-0000-0000-0000-000000000002', 'Aminata Diallo', '+22507 11 11 11 11', 'cashier')
+ON CONFLICT (id) DO UPDATE SET role = 'cashier';
+
+-- ============================================
+-- Chef User (for local development)
+-- Email: cuisine@lateranga.ci
+-- Password: Chef1234
+-- ============================================
+
+-- Create chef user in auth.users
+INSERT INTO auth.users (
+  id,
+  instance_id,
+  email,
+  encrypted_password,
+  email_confirmed_at,
+  confirmation_token,
+  recovery_token,
+  email_change,
+  email_change_token_new,
+  email_change_token_current,
+  phone_change,
+  phone_change_token,
+  reauthentication_token,
+  raw_app_meta_data,
+  raw_user_meta_data,
+  created_at,
+  updated_at,
+  role,
+  aud
+) VALUES (
+  'a0000000-0000-0000-0000-000000000003',
+  '00000000-0000-0000-0000-000000000000',
+  'cuisine@lateranga.ci',
+  '$2a$06$37d4inNvZLvenOg/OZUSleUbqNBxS2VdJFvGuKg2oy2YXZo1f2636', -- Chef1234
+  NOW(),
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '',
+  '{"provider":"email","providers":["email"]}',
+  '{"full_name":"Chef La Teranga"}',
+  NOW(),
+  NOW(),
+  'authenticated',
+  'authenticated'
+) ON CONFLICT (id) DO NOTHING;
+
+-- Create chef identity
+INSERT INTO auth.identities (
+  id,
+  user_id,
+  identity_data,
+  provider,
+  provider_id,
+  last_sign_in_at,
+  created_at,
+  updated_at
+) VALUES (
+  'a0000000-0000-0000-0000-000000000003',
+  'a0000000-0000-0000-0000-000000000003',
+  '{"sub":"a0000000-0000-0000-0000-000000000003","email":"cuisine@lateranga.ci","email_verified":true}',
+  'email',
+  'cuisine@lateranga.ci',
+  NOW(),
+  NOW(),
+  NOW()
+) ON CONFLICT (id) DO NOTHING;
+
+-- Create chef profile
+INSERT INTO profiles (id, full_name, phone, role)
+VALUES ('a0000000-0000-0000-0000-000000000003', 'Mamadou Ndiaye', '+22507 22 22 22 22', 'chef')
+ON CONFLICT (id) DO UPDATE SET role = 'chef';
 
 -- ============================================
 -- Menu Categories (8 categories)

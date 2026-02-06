@@ -8,14 +8,14 @@ ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'super_admin';
 ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'cashier';
 ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'chef';
 
--- Function to check if user has any of the specified roles
-CREATE OR REPLACE FUNCTION user_has_role(required_roles user_role[])
+-- Function to check if user has any of the specified roles (using TEXT to avoid enum transaction issues)
+CREATE OR REPLACE FUNCTION user_has_role(required_roles TEXT[])
 RETURNS BOOLEAN AS $$
 BEGIN
   RETURN EXISTS (
     SELECT 1 FROM profiles
     WHERE id = auth.uid()
-    AND role = ANY(required_roles)
+    AND role::TEXT = ANY(required_roles)
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -27,7 +27,7 @@ BEGIN
   RETURN EXISTS (
     SELECT 1 FROM profiles
     WHERE id = auth.uid()
-    AND role IN ('admin', 'super_admin', 'cashier', 'chef')
+    AND role::TEXT IN ('admin', 'super_admin', 'cashier', 'chef')
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -39,7 +39,7 @@ BEGIN
   RETURN EXISTS (
     SELECT 1 FROM profiles
     WHERE id = auth.uid()
-    AND role IN ('admin', 'super_admin')
+    AND role::TEXT IN ('admin', 'super_admin')
   );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -69,16 +69,16 @@ DROP POLICY IF EXISTS "Admins full access orders" ON orders;
 CREATE POLICY "Staff read all orders" ON orders
   FOR SELECT USING (is_staff());
 CREATE POLICY "Cashier manage orders" ON orders
-  FOR ALL USING (user_has_role(ARRAY['admin', 'super_admin', 'cashier']::user_role[]));
+  FOR ALL USING (user_has_role(ARRAY['admin', 'super_admin', 'cashier']));
 CREATE POLICY "Chef update order status" ON orders
-  FOR UPDATE USING (user_has_role(ARRAY['chef']::user_role[]));
+  FOR UPDATE USING (user_has_role(ARRAY['chef']));
 
 -- Order Items policies
 DROP POLICY IF EXISTS "Admins full access order items" ON order_items;
 CREATE POLICY "Staff read all order items" ON order_items
   FOR SELECT USING (is_staff());
 CREATE POLICY "Staff manage order items" ON order_items
-  FOR ALL USING (user_has_role(ARRAY['admin', 'super_admin', 'cashier']::user_role[]));
+  FOR ALL USING (user_has_role(ARRAY['admin', 'super_admin', 'cashier']));
 
 -- Order Status History policies
 DROP POLICY IF EXISTS "Admins read status history" ON order_status_history;

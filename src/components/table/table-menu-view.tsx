@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Minus, ShoppingCart, Trash2, Send, Clock, Check, ArrowLeft, UtensilsCrossed, ClipboardList } from "lucide-react";
+import { Plus, Minus, ShoppingCart, Trash2, Send, Clock, Check, ArrowLeft, UtensilsCrossed, ClipboardList, Heart } from "lucide-react";
 import { cn, formatXOF } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/sheet";
 import { toast } from "sonner";
 import { useTableSessionStore } from "@/stores/table-session-store";
+import { useTableRealtime } from "@/hooks/use-table-realtime";
 import { createTableOrder } from "@/actions/order.actions";
 import type { RestaurantTable, TableSession, MenuTab } from "@/types/database.types";
 
@@ -41,6 +42,7 @@ interface TableMenuViewProps {
   session: TableSession;
   categories: Category[];
   tableToken: string;
+  sessionToken?: string;
 }
 
 const tabLabels: Record<string, string> = {
@@ -55,14 +57,32 @@ const tabIcons: Record<string, string> = {
   boissons: "🥤",
 };
 
-export function TableMenuView({ table, session, categories, tableToken }: TableMenuViewProps) {
+export function TableMenuView({ table, session, categories, tableToken, sessionToken }: TableMenuViewProps) {
+  // Build orders URL based on whether we have a session token
+  const ordersUrl = sessionToken
+    ? `/table/${tableToken}/s/${sessionToken}/orders`
+    : `/table/${tableToken}/orders`;
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<string>(categories[0]?.tab ?? "plats");
   const [isPending, startTransition] = useTransition();
   const [showCart, setShowCart] = useState(false);
   const [orderSuccess, setOrderSuccess] = useState<string | null>(null);
+  const [sessionEnded, setSessionEnded] = useState(false);
 
   const { cart, addToCart, updateQty, removeFromCart, clearCart, getTotal } = useTableSessionStore();
+  const clearSession = useTableSessionStore((state) => state.clearSession);
+
+  // Handle session end
+  const handleSessionEnd = useCallback(() => {
+    setSessionEnded(true);
+    clearSession();
+  }, [clearSession]);
+
+  // Subscribe to realtime session updates
+  useTableRealtime({
+    sessionId: session.id,
+    onSessionEnd: handleSessionEnd,
+  });
 
   const filteredCategories = categories.filter((c) => c.tab === activeTab);
   const tabs = [...new Set(categories.map((c) => c.tab))];
@@ -123,6 +143,33 @@ export function TableMenuView({ table, session, categories, tableToken }: TableM
   const expiresAt = new Date(session.expires_at);
   const timeRemaining = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000 / 60));
 
+  // Session ended view
+  if (sessionEnded) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-green-50 to-background flex items-center justify-center p-4">
+        <Card className="max-w-md w-full p-8 text-center space-y-6">
+          <div className="size-20 bg-green-500 rounded-full flex items-center justify-center mx-auto">
+            <Heart className="size-10 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-green-800 mb-2">Merci de votre visite!</h1>
+            <p className="text-muted-foreground">
+              Votre session a {table.name} est terminee.
+            </p>
+          </div>
+          <div className="bg-muted/50 rounded-lg p-4">
+            <p className="text-sm text-muted-foreground">
+              Pour passer une nouvelle commande, scannez a nouveau le QR code de la table.
+            </p>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            A bientot chez La Teranga!
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
   if (orderSuccess) {
     return (
       <div className="fixed inset-0 bg-gradient-to-b from-green-50 to-background flex items-center justify-center p-4 z-50">
@@ -156,7 +203,7 @@ export function TableMenuView({ table, session, categories, tableToken }: TableM
             </Button>
             <Button
               className="flex-1 h-12"
-              onClick={() => router.push(`/table/${tableToken}/orders`)}
+              onClick={() => router.push(ordersUrl)}
             >
               Voir mes commandes
             </Button>
@@ -188,7 +235,7 @@ export function TableMenuView({ table, session, categories, tableToken }: TableM
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => router.push(`/table/${tableToken}/orders`)}
+                onClick={() => router.push(ordersUrl)}
                 className="hover:bg-primary/10 size-9"
                 title="Mes commandes"
               >

@@ -23,7 +23,7 @@ CREATE TABLE notifications (
   title TEXT NOT NULL,
   message TEXT NOT NULL,
   data JSONB NOT NULL DEFAULT '{}',
-  target_roles user_role[] NOT NULL,
+  target_roles TEXT[] NOT NULL,
   target_user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
   is_read BOOLEAN NOT NULL DEFAULT false,
   read_at TIMESTAMPTZ,
@@ -40,25 +40,25 @@ CREATE OR REPLACE FUNCTION create_notification(
   p_title TEXT,
   p_message TEXT,
   p_data JSONB DEFAULT '{}',
-  p_target_roles user_role[] DEFAULT NULL,
+  p_target_roles TEXT[] DEFAULT NULL,
   p_target_user_id UUID DEFAULT NULL
 )
 RETURNS UUID AS $$
 DECLARE
   v_notification_id UUID;
-  v_roles user_role[];
+  v_roles TEXT[];
 BEGIN
   -- Set default roles based on notification type
   IF p_target_roles IS NULL THEN
     v_roles := CASE p_type
-      WHEN 'new_order' THEN ARRAY['admin', 'super_admin', 'cashier', 'chef']::user_role[]
-      WHEN 'order_cancelled' THEN ARRAY['admin', 'super_admin', 'cashier']::user_role[]
-      WHEN 'order_ready' THEN ARRAY['cashier']::user_role[]
-      WHEN 'low_stock' THEN ARRAY['admin', 'super_admin']::user_role[]
-      WHEN 'ingredient_request' THEN ARRAY['admin', 'super_admin']::user_role[]
-      WHEN 'payment_validated' THEN ARRAY['admin', 'super_admin']::user_role[]
-      WHEN 'table_order' THEN ARRAY['cashier', 'chef']::user_role[]
-      ELSE ARRAY['admin']::user_role[]
+      WHEN 'new_order' THEN ARRAY['admin', 'super_admin', 'cashier', 'chef']
+      WHEN 'order_cancelled' THEN ARRAY['admin', 'super_admin', 'cashier']
+      WHEN 'order_ready' THEN ARRAY['cashier']
+      WHEN 'low_stock' THEN ARRAY['admin', 'super_admin']
+      WHEN 'ingredient_request' THEN ARRAY['admin', 'super_admin']
+      WHEN 'payment_validated' THEN ARRAY['admin', 'super_admin']
+      WHEN 'table_order' THEN ARRAY['cashier', 'chef']
+      ELSE ARRAY['admin']
     END;
   ELSE
     v_roles := p_target_roles;
@@ -86,9 +86,9 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION mark_all_notifications_read(p_user_id UUID)
 RETURNS VOID AS $$
 DECLARE
-  v_user_role user_role;
+  v_user_role TEXT;
 BEGIN
-  SELECT role INTO v_user_role FROM profiles WHERE id = p_user_id;
+  SELECT role::TEXT INTO v_user_role FROM profiles WHERE id = p_user_id;
 
   UPDATE notifications
   SET is_read = true, read_at = now()
@@ -112,9 +112,9 @@ RETURNS TABLE(
   created_at TIMESTAMPTZ
 ) AS $$
 DECLARE
-  v_user_role user_role;
+  v_user_role TEXT;
 BEGIN
-  SELECT role INTO v_user_role FROM profiles WHERE id = p_user_id;
+  SELECT role::TEXT INTO v_user_role FROM profiles WHERE id = p_user_id;
 
   RETURN QUERY
   SELECT n.id, n.type, n.title, n.message, n.data, n.is_read, n.created_at
@@ -129,10 +129,10 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE FUNCTION get_unread_notification_count(p_user_id UUID)
 RETURNS INTEGER AS $$
 DECLARE
-  v_user_role user_role;
+  v_user_role TEXT;
   v_count INTEGER;
 BEGIN
-  SELECT role INTO v_user_role FROM profiles WHERE id = p_user_id;
+  SELECT role::TEXT INTO v_user_role FROM profiles WHERE id = p_user_id;
 
   SELECT COUNT(*)::INTEGER INTO v_count
   FROM notifications n
@@ -254,7 +254,7 @@ ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users read own notifications" ON notifications
   FOR SELECT USING (
     target_user_id = auth.uid()
-    OR (SELECT role FROM profiles WHERE id = auth.uid()) = ANY(target_roles)
+    OR (SELECT role::TEXT FROM profiles WHERE id = auth.uid()) = ANY(target_roles)
   );
 
 -- System can insert notifications
@@ -265,7 +265,7 @@ CREATE POLICY "System insert notifications" ON notifications
 CREATE POLICY "Users update own notifications" ON notifications
   FOR UPDATE USING (
     target_user_id = auth.uid()
-    OR (SELECT role FROM profiles WHERE id = auth.uid()) = ANY(target_roles)
+    OR (SELECT role::TEXT FROM profiles WHERE id = auth.uid()) = ANY(target_roles)
   );
 
 -- ============================================

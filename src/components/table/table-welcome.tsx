@@ -33,7 +33,8 @@ export function TableWelcome({ table, session, tableToken }: TableWelcomeProps) 
   const timeRemaining = Math.max(0, Math.floor((expiresAt.getTime() - Date.now()) / 1000 / 60));
 
   const handleViewMenu = () => {
-    router.push(`/table/${tableToken}/menu`);
+    // Redirect to session-specific URL
+    router.push(`/table/${tableToken}/s/${session.session_token}/menu`);
   };
 
   return (

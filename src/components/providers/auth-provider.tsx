@@ -37,6 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const initializedRef = useRef(false);
+  const userIdRef = useRef<string | null>(null);
   const supabase = getSupabaseClient();
 
   const fetchProfile = useCallback(async (userId: string) => {
@@ -74,6 +75,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!isMounted) return;
 
         setUser(authUser);
+        userIdRef.current = authUser?.id ?? null;
 
         if (authUser) {
           const userProfile = await fetchProfile(authUser.id);
@@ -92,19 +94,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     initAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!isMounted) return;
 
       const currentUser = session?.user ?? null;
-      setUser(currentUser);
+      const currentUserId = currentUser?.id ?? null;
 
-      if (currentUser) {
-        const userProfile = await fetchProfile(currentUser.id);
-        if (isMounted) {
-          setProfile(userProfile);
+      // Only update if user actually changed (use ref to avoid stale closure)
+      if (currentUserId !== userIdRef.current) {
+        userIdRef.current = currentUserId;
+        setUser(currentUser);
+
+        if (currentUser) {
+          // Show loading while fetching profile for new user
+          setIsLoading(true);
+          const userProfile = await fetchProfile(currentUser.id);
+          if (isMounted) {
+            setProfile(userProfile);
+            setIsLoading(false);
+          }
+        } else {
+          setProfile(null);
+          setIsLoading(false);
         }
-      } else {
-        setProfile(null);
       }
     });
 

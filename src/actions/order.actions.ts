@@ -360,3 +360,136 @@ export async function getSessionOrders(sessionId: string) {
 
   return { data };
 }
+
+// Check if all orders in a session are paid or cancelled, and close the session
+async function closeSessionIfAllPaid(sessionId: string): Promise<boolean> {
+  const supabase = createAdminClient();
+
+  // Get all orders for this session
+  const { data: orders, error } = await supabase
+    .from("orders")
+    .select("id, payment_status, status")
+    .eq("table_session_id", sessionId);
+
+  if (error || !orders || orders.length === 0) {
+    return false;
+  }
+
+  // Check if all orders are either paid or cancelled
+  const allPaidOrCancelled = orders.every(
+    (order) => order.payment_status === "paid" || order.status === "cancelled"
+  );
+
+  if (allPaidOrCancelled) {
+    // Close the session
+    const { error: closeError } = await supabase
+      .from("table_sessions")
+      .update({
+        is_active: false,
+        ended_at: new Date().toISOString(),
+      })
+      .eq("id", sessionId);
+
+    if (closeError) {
+      console.error("Error closing session:", closeError);
+      return false;
+    }
+
+    console.log(`[closeSessionIfAllPaid] Session ${sessionId} closed - all orders paid`);
+    return true;
+  }
+
+  return false;
+}
+
+// Mark order as paid (for admin/cashier)
+export async function markOrderAsPaid(orderId: string) {
+  const isAdmin = await isCurrentUserAdmin();
+  if (!isAdmin) {
+    return { error: "Non autorise" };
+  }
+
+  const supabase = createAdminClient();
+
+  // Get order to check session
+  const { data: orderBefore } = await supabase
+    .from("orders")
+    .select("table_session_id")
+    .eq("id", orderId)
+    .single();
+
+  const { data, error } = await supabase
+    .from("orders")
+    .update({
+      payment_status: "paid",
+      paid_at: new Date().toISOString(),
+    } as never)
+    .eq("id", orderId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Error marking order as paid:", error);
+    return { error: error.message };
+  }
+
+  // Check if all orders in session are paid and close session if so
+  let sessionClosed = false;
+  if (orderBefore?.table_session_id) {
+    sessionClosed = await closeSessionIfAllPaid(orderBefore.table_session_id);
+  }
+
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/tables");
+  revalidatePath("/admin");
+
+  return { success: true, data, sessionClosed };
+}
+
+// Get full order details with items (for receipt)
+export async function getOrderWithItems(orderId: string) {
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("orders")
+    .select(`
+      *,
+      order_items (
+        id,
+        item_name,
+        item_price,
+        quantity,
+        line_total,
+        size_variant
+      ),
+      restaurant_tables (
+        name,
+        table_number
+      )
+    `)
+    .eq("id", orderId)
+    .single();
+
+  if (error) {
+    console.error("Error fetching order with items:", error);
+    return { error: error.message };
+  }
+
+  return { data };
+}
+
+// Get pending orders count (for dashboard notifications)
+export async function getPendingOrdersCount() {
+  const supabase = createAdminClient();
+
+  const { count, error } = await supabase
+    .from("orders")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "pending");
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { count: count ?? 0 };
+}

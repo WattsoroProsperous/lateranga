@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { signInSchema, type SignInInput } from "@/lib/validations/auth.schema";
@@ -12,6 +13,7 @@ import { Loader2, Mail, Lock } from "lucide-react";
 import Link from "next/link";
 
 export function LoginForm() {
+  const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
   const {
@@ -24,9 +26,17 @@ export function LoginForm() {
 
   async function onSubmit(data: SignInInput) {
     setServerError(null);
-    const result = await signIn(data);
-    if (result?.error) {
-      setServerError(result.error);
+    try {
+      const result = await signIn(data);
+      if (result?.error) {
+        setServerError(result.error);
+      } else if (result?.redirectTo) {
+        router.push(result.redirectTo);
+        router.refresh();
+      }
+    } catch (error) {
+      console.error("Login error:", error);
+      setServerError("Erreur lors de la connexion");
     }
   }
 
